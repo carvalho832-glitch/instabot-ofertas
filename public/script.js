@@ -86,6 +86,8 @@ let products = [];
 let interactions = [];
 let botConfig = {};
 let lastGeneratedMessage = "";
+let isDatabaseOnline = false;
+let isBooting = true;
 
 const defaultTemplate = `Oi, {{nome}} 😍
 
@@ -190,22 +192,35 @@ const defaultConfig = {
   accessToken: "",
   verifyToken: "instabot_verify_" + Math.floor(Math.random() * 999999),
   botMode: "simulation",
-  webhookUrl: "https://seu-app.onrender.com/webhook",
+  webhookUrl: "https://instabot-ofertas.onrender.com/webhook",
   publicReply: true,
   blockDuplicate: true
 };
 
-function startApp() {
+async function startApp() {
   setupTabs();
-  loadConfig();
-  loadData();
-
-  if (!products.length) createDemoProduct();
-
+  setLoading(true);
   els.messageTemplate.value = defaultTemplate;
+
+  await loadData();
+  await loadConfig();
+
+  if (!products.length) {
+    await createDemoProduct();
+  }
+
   clearForm(false);
   renderAll();
   loadSelectedProductToMessageFields();
+  setLoading(false);
+  isBooting = false;
+
+  addLog(
+    isDatabaseOnline
+      ? "Banco Supabase conectado. Produtos agora são salvos na nuvem."
+      : "Modo local ativo. O banco não respondeu, então usei o navegador como reserva.",
+    isDatabaseOnline ? "success" : "warning"
+  );
 }
 
 function setupTabs() {
@@ -216,14 +231,77 @@ function setupTabs() {
       document.querySelectorAll(".tab-content").forEach((content) => content.classList.remove("active"));
       button.classList.add("active");
       $("tab-" + tab).classList.add("active");
-      if (tab === "messages") loadSelectedProductToMessageFields();
+      if (tab === "messages") {
+        renderMessageProducts();
+        loadSelectedProductToMessageFields();
+      }
       if (tab === "data") renderDataPanel();
     });
   });
 }
 
-function createDemoProduct() {
-  products = [normalizeProduct({
+async function apiRequest(path, options = {}) {
+  const response = await fetch(path, {
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    },
+    ...options
+  });
+
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+
+  if (!response.ok) {
+    throw new Error(data?.message || data?.error || "Erro na API");
+  }
+
+  return data;
+}
+
+function setLoading(isLoading) {
+  [
+    els.saveProduct,
+    els.simulateComment,
+    els.clearAll,
+    els.generateMessage,
+    els.applyGeneratedTemplate,
+    els.importData,
+    els.clearHistory,
+    els.saveConfig,
+    els.resetConfig
+  ].forEach((button) => {
+    if (button) button.disabled = isLoading;
+  });
+}
+
+async function loadData() {
+  try {
+    const [remoteProducts, remoteInteractions] = await Promise.all([
+      apiRequest("/api/produtos"),
+      apiRequest("/api/interacoes")
+    ]);
+
+    products = remoteProducts.map(normalizeProduct);
+    interactions = remoteInteractions || [];
+    isDatabaseOnline = true;
+  } catch (error) {
+    const savedProducts = localStorage.getItem("instabot_products_v1_github");
+    const savedInteractions = localStorage.getItem("instabot_interactions_v1_github");
+    products = savedProducts ? JSON.parse(savedProducts).map(normalizeProduct) : [];
+    interactions = savedInteractions ? JSON.parse(savedInteractions) : [];
+    isDatabaseOnline = false;
+  }
+}
+
+async function reloadFromDatabase() {
+  if (!isDatabaseOnline) return;
+  await loadData();
+  renderAll();
+}
+
+async function createDemoProduct() {
+  const demoProduct = normalizeProduct({
     name: "Fone Bluetooth Bose",
     platform: "Shopee",
     category: "Eletrônicos",
@@ -240,12 +318,29 @@ function createDemoProduct() {
     internalNotes: "Produto de demonstração para testar o fluxo do bot.",
     template: defaultTemplate,
     active: true
-  })];
+  });
+
+  if (isDatabaseOnline) {
+    try {
+      const saved = await apiRequest("/api/produtos", {
+        method: "POST",
+        body: JSON.stringify(demoProduct)
+      });
+      products = [normalizeProduct(saved)];
+      return;
+    } catch (error) {
+      addLog("Não consegui criar produto demo no banco. Usando modo local.", "warning");
+      isDatabaseOnline = false;
+    }
+  }
+
+  products = [demoProduct];
   saveData();
 }
 
 function getFormProduct() {
-  return {
+  return normalizeProduct({
+    id: els.editingId.value || undefined,
     name: els.productName.value.trim(),
     platform: els.productPlatform.value,
     category: els.categoryName.value.trim(),
@@ -261,27 +356,54 @@ function getFormProduct() {
     freeShipping: els.freeShipping.checked,
     template: els.messageTemplate.value.trim() || defaultTemplate,
     internalNotes: els.internalNotes.value.trim()
-  };
+  });
 }
 
-function saveProductHandler() {
+async function saveProductHandler() {
   const data = getFormProduct();
+
   if (!data.name || !data.link || !data.postId || !data.keywords.length) {
     addLog("Preencha nome, link, ID do post/reel e palavras-chave.", "warning");
     return;
   }
 
-  if (els.editingId.value) {
-    products = products.map((product) => product.id === els.editingId.value ? { ...product, ...data } : product);
-    addLog(`Produto "${data.name}" atualizado com sucesso.`, "success");
-  } else {
-    products.unshift(normalizeProduct(data));
-    addLog(`Produto "${data.name}" cadastrado com sucesso.`, "success");
-  }
+  setLoading(true);
 
-  saveData();
-  clearForm();
-  renderAll();
+  try {
+    if (isDatabaseOnline) {
+      if (els.editingId.value) {
+        const saved = await apiRequest(`/api/produtos/${els.editingId.value}`, {
+          method: "PUT",
+          body: JSON.stringify(data)
+        });
+        products = products.map((product) => (product.id === saved.id ? normalizeProduct(saved) : product));
+        addLog(`Produto "${saved.name}" atualizado no Supabase.`, "success");
+      } else {
+        const saved = await apiRequest("/api/produtos", {
+          method: "POST",
+          body: JSON.stringify(data)
+        });
+        products.unshift(normalizeProduct(saved));
+        addLog(`Produto "${saved.name}" salvo no Supabase.`, "success");
+      }
+    } else {
+      if (els.editingId.value) {
+        products = products.map((product) => (product.id === els.editingId.value ? { ...product, ...data } : product));
+        addLog(`Produto "${data.name}" atualizado localmente.`, "success");
+      } else {
+        products.unshift(data);
+        addLog(`Produto "${data.name}" salvo localmente.`, "success");
+      }
+      saveData();
+    }
+
+    clearForm(false);
+    renderAll();
+  } catch (error) {
+    addLog(`Erro ao salvar produto: ${error.message}`, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
 function editProduct(id) {
@@ -312,25 +434,50 @@ function editProduct(id) {
   addLog(`Editando produto "${product.name}".`, "warning");
 }
 
-function deleteProduct(id) {
+async function deleteProduct(id) {
   const product = products.find((item) => item.id === id);
   if (!product || !confirm(`Excluir "${product.name}"?`)) return;
-  products = products.filter((item) => item.id !== id);
-  interactions = interactions.filter((item) => item.productId !== id);
-  saveData();
-  renderAll();
-  addLog(`Produto "${product.name}" excluído.`, "error");
+
+  setLoading(true);
+
+  try {
+    if (isDatabaseOnline) {
+      await apiRequest(`/api/produtos/${id}`, { method: "DELETE" });
+    }
+    products = products.filter((item) => item.id !== id);
+    interactions = interactions.filter((item) => item.productId !== id);
+    saveData();
+    renderAll();
+    addLog(`Produto "${product.name}" excluído.`, "error");
+  } catch (error) {
+    addLog(`Erro ao excluir produto: ${error.message}`, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-function toggleProduct(id) {
-  products = products.map((product) => {
-    if (product.id !== id) return product;
-    const updated = { ...product, active: !product.active };
+async function toggleProduct(id) {
+  const product = products.find((item) => item.id === id);
+  if (!product) return;
+
+  const updated = { ...product, active: !product.active };
+
+  try {
+    if (isDatabaseOnline) {
+      const saved = await apiRequest(`/api/produtos/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(updated)
+      });
+      products = products.map((item) => (item.id === id ? normalizeProduct(saved) : item));
+    } else {
+      products = products.map((item) => (item.id === id ? updated : item));
+      saveData();
+    }
+    renderAll();
     addLog(`Produto "${product.name}" agora está ${updated.active ? "ativo" : "inativo"}.`, updated.active ? "success" : "warning");
-    return updated;
-  });
-  saveData();
-  renderAll();
+  } catch (error) {
+    addLog(`Erro ao alterar status: ${error.message}`, "error");
+  }
 }
 
 function clearForm(showLog = true) {
@@ -356,19 +503,31 @@ function clearForm(showLog = true) {
   if (showLog) addLog("Formulário limpo.", "warning");
 }
 
-function clearAllProducts() {
+async function clearAllProducts() {
   if (!confirm("Deseja apagar todos os produtos e interações?")) return;
-  products = [];
-  interactions = [];
-  lastGeneratedMessage = "";
-  els.copyLastMessage.disabled = true;
-  saveData();
-  renderAll();
-  resetDirectPreview();
-  addLog("Todos os produtos e interações foram apagados.", "error");
+
+  setLoading(true);
+
+  try {
+    if (isDatabaseOnline) {
+      await apiRequest("/api/produtos", { method: "DELETE" });
+    }
+    products = [];
+    interactions = [];
+    lastGeneratedMessage = "";
+    els.copyLastMessage.disabled = true;
+    saveData();
+    renderAll();
+    resetDirectPreview();
+    addLog("Todos os produtos e interações foram apagados.", "error");
+  } catch (error) {
+    addLog(`Erro ao limpar produtos: ${error.message}`, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-function simulateInstagramComment() {
+async function simulateInstagramComment() {
   const currentPostId = els.simPostId.value.trim();
   const username = els.commentUser.value.trim();
   const comment = els.commentText.value.trim();
@@ -382,10 +541,7 @@ function simulateInstagramComment() {
   const product = findProductByComment(currentPostId, comment);
 
   if (!product) {
-    interactions.push(createInteraction({ username, postId: currentPostId, comment, reason: "Nenhum produto encontrado" }));
-    saveData();
-    renderDashboard();
-    renderDataPanel();
+    await saveInteraction(createInteraction({ username, postId: currentPostId, comment, reason: "Nenhum produto encontrado" }));
     els.matchedProduct.innerHTML = "Nenhum produto ativo encontrou esse ID + palavra-chave.";
     els.matchedProduct.className = "matched-empty";
     addLog("Nenhum produto ativo corresponde ao comentário recebido.", "warning");
@@ -395,33 +551,69 @@ function simulateInstagramComment() {
   renderMatchedProduct(product);
 
   if (alreadySent(username, product.id)) {
-    interactions.push(createInteraction({ productId: product.id, username, postId: currentPostId, comment, reason: "Direct duplicado bloqueado" }));
-    saveData();
-    renderDashboard();
-    renderDataPanel();
+    await saveInteraction(createInteraction({ productId: product.id, username, postId: currentPostId, comment, reason: "Direct duplicado bloqueado" }));
     addLog(`Direct bloqueado. ${username} já recebeu o link desse produto.`, "warning");
     return;
   }
 
   const message = buildMessage(product, username);
-  interactions.push(createInteraction({ productId: product.id, username, postId: currentPostId, comment, directSent: true, reason: "Mensagem enviada" }));
-  products = products.map((item) => item.id === product.id ? { ...item, directs: Number(item.directs || 0) + 1 } : item);
+  await saveInteraction(createInteraction({ productId: product.id, username, postId: currentPostId, comment, directSent: true, reason: "Mensagem enviada" }));
+  await saveProductDirectCount({ ...product, directs: Number(product.directs || 0) + 1 });
 
   lastGeneratedMessage = message;
   els.copyLastMessage.disabled = false;
-  saveData();
-  renderAll();
   sendDirect(username, product, message);
 
   if (botConfig.publicReply) addLog(`Resposta pública simulada: "${username}, te mandei o link no Direct 🛒"`, "success");
   addLog(`Palavra-chave detectada. Direct enviado para ${username}.`, "success");
 }
 
+async function saveInteraction(interaction) {
+  try {
+    if (isDatabaseOnline) {
+      const saved = await apiRequest("/api/interacoes", {
+        method: "POST",
+        body: JSON.stringify(interaction)
+      });
+      interactions.unshift(saved);
+    } else {
+      interactions.push(interaction);
+      saveData();
+    }
+    renderDashboard();
+    renderDataPanel();
+  } catch (error) {
+    addLog(`Erro ao salvar interação: ${error.message}`, "error");
+  }
+}
+
+async function saveProductDirectCount(product) {
+  try {
+    if (isDatabaseOnline) {
+      const saved = await apiRequest(`/api/produtos/${product.id}`, {
+        method: "PUT",
+        body: JSON.stringify(product)
+      });
+      products = products.map((item) => (item.id === product.id ? normalizeProduct(saved) : item));
+    } else {
+      products = products.map((item) => (item.id === product.id ? product : item));
+      saveData();
+    }
+    renderProducts();
+    renderDashboard();
+    renderDataPanel();
+  } catch (error) {
+    addLog(`Erro ao atualizar contador do produto: ${error.message}`, "error");
+  }
+}
+
 function createInteraction(data) {
   return {
     id: generateId(),
     productId: data.productId || null,
+    instagramUserId: data.instagramUserId || null,
     username: data.username,
+    commentId: data.commentId || null,
     postId: data.postId,
     comment: data.comment,
     directSent: Boolean(data.directSent),
@@ -431,10 +623,7 @@ function createInteraction(data) {
 }
 
 function findProductByComment(currentPostId, comment) {
-  return products.find((product) => {
-    if (!product.active) return false;
-    return normalizeText(product.postId) === normalizeText(currentPostId) && commentHasKeyword(comment, product.keywords || []);
-  });
+  return products.find((product) => product.active && normalizeText(product.postId) === normalizeText(currentPostId) && commentHasKeyword(comment, product.keywords || []));
 }
 
 function commentHasKeyword(comment, keywordList) {
@@ -508,6 +697,7 @@ function renderMatchedProduct(product) {
 function renderProducts() {
   const search = normalizeText(els.productSearch.value || "");
   const filter = els.statusFilter.value || "all";
+
   const filteredProducts = products.filter((product) => {
     const searchText = normalizeText(`${product.name} ${product.postId} ${(product.keywords || []).join(" ")} ${product.link} ${product.couponCode} ${product.benefitText} ${product.platform} ${product.category} ${product.internalNotes}`);
     const matchesSearch = !search || searchText.includes(search);
@@ -538,6 +728,7 @@ function renderProducts() {
           <div class="badges">
             <span class="badge ${product.active ? "active" : "inactive"}">${product.active ? "Ativo" : "Inativo"}</span>
             <span class="badge">${Number(product.directs || 0)} Directs enviados</span>
+            <span class="badge">${isDatabaseOnline ? "Supabase" : "Local"}</span>
             <span class="badge">${escapeHtml(product.platform || "Sem plataforma")}</span>
             ${product.category ? `<span class="badge">${escapeHtml(product.category)}</span>` : ""}
             ${product.couponCode ? `<span class="badge">Cupom: ${escapeHtml(product.couponCode)}</span>` : ""}
@@ -572,6 +763,7 @@ function renderMessageProducts() {
     els.messageProductSelect.innerHTML = `<option value="">Nenhum produto cadastrado</option>`;
     return;
   }
+
   const currentValue = els.messageProductSelect.value;
   els.messageProductSelect.innerHTML = products.map((product) => `<option value="${product.id}">${escapeHtml(product.name)} - ${escapeHtml(product.postId)}</option>`).join("");
   if (currentValue && products.some((product) => product.id === currentValue)) els.messageProductSelect.value = currentValue;
@@ -599,32 +791,42 @@ function getSelectedMessageProduct() {
 
 function generateSmartMessage() {
   const product = getSelectedMessageProduct();
-  if (!product) {
-    addLog("Cadastre um produto antes de gerar mensagem.", "warning");
-    return;
-  }
+  if (!product) return addLog("Cadastre um produto antes de gerar mensagem.", "warning");
   els.generatedTemplate.value = templatesByTone[els.messageTone.value] || templatesByTone.short;
   updatePublicReplyPreview();
   addLog(`Modelo de mensagem gerado para "${product.name}".`, "success");
 }
 
-function applyGeneratedTemplateToProduct() {
+async function applyGeneratedTemplateToProduct() {
   const product = getSelectedMessageProduct();
   if (!product) return addLog("Selecione um produto para aplicar o modelo.", "warning");
   if (!els.generatedTemplate.value.trim()) return addLog("Gere ou escreva um modelo antes de aplicar.", "warning");
 
-  products = products.map((item) => item.id === product.id ? {
-    ...item,
+  const updated = {
+    ...product,
     template: els.generatedTemplate.value.trim(),
     couponCode: els.msgCoupon.value.trim(),
     offerValidity: els.msgValidity.value.trim(),
     benefitText: els.msgBenefit.value.trim(),
     freeShipping: els.msgFreeShipping.checked
-  } : item);
+  };
 
-  saveData();
-  renderAll();
-  addLog(`Modelo aplicado ao produto "${product.name}".`, "success");
+  try {
+    if (isDatabaseOnline) {
+      const saved = await apiRequest(`/api/produtos/${product.id}`, {
+        method: "PUT",
+        body: JSON.stringify(updated)
+      });
+      products = products.map((item) => (item.id === product.id ? normalizeProduct(saved) : item));
+    } else {
+      products = products.map((item) => (item.id === product.id ? updated : item));
+      saveData();
+    }
+    renderAll();
+    addLog(`Modelo aplicado ao produto "${product.name}".`, "success");
+  } catch (error) {
+    addLog(`Erro ao aplicar modelo: ${error.message}`, "error");
+  }
 }
 
 function copyGeneratedTemplateHandler() {
@@ -657,17 +859,22 @@ function renderDataPanel() {
     return;
   }
 
-  els.interactionsPreview.innerHTML = interactions.slice().reverse().slice(0, 12).map((item) => {
-    const product = products.find((product) => product.id === item.productId);
-    return `
-      <div class="interaction-item">
-        <strong>${escapeHtml(item.username)} comentou: "${escapeHtml(item.comment)}"</strong>
-        <span>Produto: ${escapeHtml(product ? product.name : "Produto não encontrado")}</span>
-        <span>Post/Reel: ${escapeHtml(item.postId)}</span>
-        <span>Status: ${item.directSent ? "Direct enviado" : escapeHtml(item.reason || "Não enviado")}</span>
-      </div>
-    `;
-  }).join("");
+  els.interactionsPreview.innerHTML = interactions
+    .slice()
+    .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+    .slice(0, 12)
+    .map((item) => {
+      const product = products.find((product) => product.id === item.productId);
+      return `
+        <div class="interaction-item">
+          <strong>${escapeHtml(item.username)} comentou: "${escapeHtml(item.comment)}"</strong>
+          <span>Produto: ${escapeHtml(product ? product.name : "Produto não encontrado")}</span>
+          <span>Post/Reel: ${escapeHtml(item.postId)}</span>
+          <span>Status: ${item.directSent ? "Direct enviado" : escapeHtml(item.reason || "Não enviado")}</span>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 function exportProductsJson() {
@@ -677,7 +884,8 @@ function exportProductsJson() {
 
 function exportFullBackup() {
   downloadJson("instabot-backup-completo.json", {
-    version: "v1-github",
+    version: "v2-supabase",
+    storage: isDatabaseOnline ? "supabase" : "local",
     exportedAt: new Date().toISOString(),
     products,
     interactions,
@@ -686,51 +894,95 @@ function exportFullBackup() {
   addLog("Backup completo exportado.", "success");
 }
 
-function importJsonData() {
+async function importJsonData() {
   const text = els.importJson.value.trim();
   if (!text) return addLog("Cole um JSON antes de importar.", "warning");
   if (!confirm("Importar esse JSON vai substituir os dados atuais. Continuar?")) return;
 
+  setLoading(true);
+
   try {
     const parsed = JSON.parse(text);
-    if (els.importMode.value === "products") {
-      const importedProducts = Array.isArray(parsed) ? parsed : parsed.products;
-      if (!Array.isArray(importedProducts)) return addLog("JSON inválido para importar produtos.", "error");
-      products = importedProducts.map(normalizeProduct);
-      interactions = [];
-    } else {
-      if (!Array.isArray(parsed.products)) return addLog("Backup inválido. O campo products não foi encontrado.", "error");
-      products = parsed.products.map(normalizeProduct);
-      interactions = Array.isArray(parsed.interactions) ? parsed.interactions : [];
-      botConfig = parsed.botConfig ? { ...defaultConfig, ...parsed.botConfig } : botConfig;
-      saveConfigToStorage();
-      renderConfigForm();
-      updateConnectionStatus();
+    const importedProducts = els.importMode.value === "products" ? (Array.isArray(parsed) ? parsed : parsed.products) : parsed.products;
+
+    if (!Array.isArray(importedProducts)) {
+      addLog("JSON inválido. O campo products não foi encontrado.", "error");
+      return;
     }
-    saveData();
+
+    if (isDatabaseOnline) {
+      await apiRequest("/api/produtos", { method: "DELETE" });
+      for (const product of importedProducts) {
+        await apiRequest("/api/produtos", {
+          method: "POST",
+          body: JSON.stringify(normalizeProduct(product))
+        });
+      }
+      if (els.importMode.value === "backup" && parsed.botConfig) await saveConfigToApi(parsed.botConfig);
+      await reloadFromDatabase();
+    } else {
+      products = importedProducts.map(normalizeProduct);
+      interactions = els.importMode.value === "backup" && Array.isArray(parsed.interactions) ? parsed.interactions : [];
+      if (els.importMode.value === "backup" && parsed.botConfig) {
+        botConfig = { ...defaultConfig, ...parsed.botConfig };
+        saveConfigToStorage();
+        renderConfigForm();
+        updateConnectionStatus();
+      }
+      saveData();
+      renderAll();
+    }
+
     els.importJson.value = "";
-    renderAll();
     addLog("JSON importado com sucesso.", "success");
   } catch (error) {
-    addLog("Não foi possível importar. Verifique se o JSON está correto.", "error");
+    addLog(`Não foi possível importar: ${error.message}`, "error");
+  } finally {
+    setLoading(false);
   }
 }
 
-function clearOnlyHistory() {
+async function clearOnlyHistory() {
   if (!confirm("Deseja limpar somente o histórico de interações? Os produtos serão mantidos.")) return;
-  interactions = [];
-  products = products.map((product) => ({ ...product, directs: 0 }));
-  lastGeneratedMessage = "";
-  els.copyLastMessage.disabled = true;
-  saveData();
-  renderAll();
-  resetDirectPreview();
-  addLog("Histórico de interações limpo.", "warning");
+
+  setLoading(true);
+
+  try {
+    if (isDatabaseOnline) {
+      await apiRequest("/api/interacoes", { method: "DELETE" });
+      await reloadFromDatabase();
+    } else {
+      interactions = [];
+      products = products.map((product) => ({ ...product, directs: 0 }));
+      saveData();
+      renderAll();
+    }
+
+    lastGeneratedMessage = "";
+    els.copyLastMessage.disabled = true;
+    resetDirectPreview();
+    addLog("Histórico de interações limpo.", "warning");
+  } catch (error) {
+    addLog(`Erro ao limpar histórico: ${error.message}`, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-function loadConfig() {
-  const savedConfig = localStorage.getItem("instabot_config_v1_github");
-  botConfig = savedConfig ? JSON.parse(savedConfig) : { ...defaultConfig };
+async function loadConfig() {
+  try {
+    if (isDatabaseOnline) {
+      const remoteConfig = await apiRequest("/api/configuracoes");
+      botConfig = remoteConfig ? { ...defaultConfig, ...remoteConfig } : { ...defaultConfig };
+    } else {
+      const savedConfig = localStorage.getItem("instabot_config_v1_github");
+      botConfig = savedConfig ? { ...defaultConfig, ...JSON.parse(savedConfig) } : { ...defaultConfig };
+    }
+  } catch (error) {
+    const savedConfig = localStorage.getItem("instabot_config_v1_github");
+    botConfig = savedConfig ? { ...defaultConfig, ...JSON.parse(savedConfig) } : { ...defaultConfig };
+  }
+
   renderConfigForm();
   updateConnectionStatus();
 }
@@ -751,6 +1003,7 @@ function renderConfigForm() {
 
 function getConfigFromForm() {
   return {
+    id: botConfig.id,
     accountName: els.accountName.value.trim(),
     instagramUser: els.instagramUser.value.trim(),
     instagramBusinessId: els.instagramBusinessId.value.trim(),
@@ -765,45 +1018,70 @@ function getConfigFromForm() {
   };
 }
 
-function saveBotConfig() {
+async function saveBotConfig() {
   botConfig = getConfigFromForm();
-  saveConfigToStorage();
-  updateConnectionStatus();
-  renderDataPanel();
-  addLog("Configurações do Instagram salvas.", "success");
+
+  try {
+    if (isDatabaseOnline) {
+      botConfig = { ...botConfig, ...(await saveConfigToApi(botConfig)) };
+    } else {
+      saveConfigToStorage();
+    }
+    updateConnectionStatus();
+    renderDataPanel();
+    addLog("Configurações do Instagram salvas.", "success");
+  } catch (error) {
+    addLog(`Erro ao salvar configurações: ${error.message}`, "error");
+  }
+}
+
+async function saveConfigToApi(config) {
+  const saved = await apiRequest("/api/configuracoes", {
+    method: "POST",
+    body: JSON.stringify(config)
+  });
+  return { ...config, ...saved };
 }
 
 function saveConfigToStorage() {
   localStorage.setItem("instabot_config_v1_github", JSON.stringify(botConfig));
 }
 
-function resetBotConfig() {
+async function resetBotConfig() {
   if (!confirm("Restaurar configurações padrão?")) return;
   botConfig = { ...defaultConfig };
-  saveConfigToStorage();
-  renderConfigForm();
-  updateConnectionStatus();
-  renderDataPanel();
-  addLog("Configurações restauradas para o padrão.", "warning");
+
+  try {
+    if (isDatabaseOnline) {
+      botConfig = { ...botConfig, ...(await saveConfigToApi(botConfig)) };
+    } else {
+      saveConfigToStorage();
+    }
+    renderConfigForm();
+    updateConnectionStatus();
+    renderDataPanel();
+    addLog("Configurações restauradas para o padrão.", "warning");
+  } catch (error) {
+    addLog(`Erro ao restaurar configurações: ${error.message}`, "error");
+  }
 }
 
 function updateConnectionStatus() {
-  const isConnected = botConfig.botMode === "connected";
-  const hasMinimumData = botConfig.instagramBusinessId && botConfig.facebookPageId && botConfig.metaAppId && botConfig.accessToken && botConfig.webhookUrl;
+  const hasMinimumData = botConfig.instagramBusinessId && botConfig.facebookPageId && botConfig.metaAppId && botConfig.webhookUrl;
 
-  if (isConnected && hasMinimumData) {
+  if (botConfig.botMode === "connected" && hasMinimumData) {
     els.connectionTitle.textContent = "Conta pronta para conexão";
     els.connectionText.textContent = `${botConfig.instagramUser || "Instagram"} configurado para integração real.`;
-    els.connectionBadge.textContent = "Conectado";
+    els.connectionBadge.textContent = isDatabaseOnline ? "Banco conectado" : "Conectado";
     els.connectionBadge.className = "connection-badge connected";
   } else {
-    els.connectionTitle.textContent = "Modo simulação ativo";
-    els.connectionText.textContent = "Nenhuma conta real conectada ainda.";
-    els.connectionBadge.textContent = "Simulação";
-    els.connectionBadge.className = "connection-badge simulation";
+    els.connectionTitle.textContent = isDatabaseOnline ? "Supabase conectado" : "Modo simulação ativo";
+    els.connectionText.textContent = isDatabaseOnline ? "Produtos e interações serão salvos no banco." : "Nenhuma conta real conectada ainda.";
+    els.connectionBadge.textContent = isDatabaseOnline ? "Supabase" : "Simulação";
+    els.connectionBadge.className = isDatabaseOnline ? "connection-badge connected" : "connection-badge simulation";
   }
 
-  els.webhookPreview.textContent = botConfig.webhookUrl || "https://seu-app.onrender.com/webhook";
+  els.webhookPreview.textContent = botConfig.webhookUrl || "https://instabot-ofertas.onrender.com/webhook";
   toggleCheck(els.checkAccount, Boolean(botConfig.instagramUser));
   toggleCheck(els.checkPage, Boolean(botConfig.facebookPageId));
   toggleCheck(els.checkApp, Boolean(botConfig.metaAppId));
@@ -855,6 +1133,7 @@ function downloadJson(filename, data) {
 }
 
 function addLog(message, type = "success") {
+  if (!els.botLog) return;
   const muted = els.botLog.querySelector(".muted");
   if (muted) els.botLog.innerHTML = "";
   const item = document.createElement("div");
@@ -874,6 +1153,8 @@ function renderAll() {
   renderDashboard();
   renderDataPanel();
   renderLogStart();
+  updatePublicReplyPreview();
+  updateConnectionStatus();
 }
 
 function resetDirectPreview() {
@@ -887,7 +1168,13 @@ function normalizeText(text) {
 }
 
 function escapeHtml(text) {
-  return String(text || "").replace(/[&<>"']/g, (match) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[match]));
+  return String(text || "").replace(/[&<>"']/g, (match) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  }[match]));
 }
 
 function escapeAttribute(text) {
@@ -899,40 +1186,34 @@ function generateId() {
 }
 
 function saveData() {
+  if (isDatabaseOnline && !isBooting) return;
   localStorage.setItem("instabot_products_v1_github", JSON.stringify(products));
   localStorage.setItem("instabot_interactions_v1_github", JSON.stringify(interactions));
 }
 
-function normalizeProduct(product) {
+function normalizeProduct(product = {}) {
   return {
-    id: generateId(),
-    name: "",
-    platform: "Shopee",
-    category: "",
-    oldPrice: "",
-    newPrice: "",
-    link: "",
-    image: "",
-    postId: "",
-    keywords: [],
-    couponCode: "",
-    offerValidity: "",
-    benefitText: "",
-    freeShipping: false,
-    internalNotes: "",
-    template: defaultTemplate,
-    active: true,
-    directs: 0,
-    createdAt: new Date().toISOString(),
-    ...product
+    id: product.id || generateId(),
+    name: product.name || "",
+    platform: product.platform || "Shopee",
+    category: product.category || "",
+    oldPrice: product.oldPrice || "",
+    newPrice: product.newPrice || "",
+    link: product.link || "",
+    image: product.image || "",
+    postId: product.postId || "",
+    keywords: Array.isArray(product.keywords) ? product.keywords : [],
+    couponCode: product.couponCode || "",
+    offerValidity: product.offerValidity || "",
+    benefitText: product.benefitText || "",
+    freeShipping: Boolean(product.freeShipping),
+    internalNotes: product.internalNotes || "",
+    template: product.template || defaultTemplate,
+    active: product.active !== false,
+    directs: Number(product.directs || 0),
+    createdAt: product.createdAt || new Date().toISOString(),
+    updatedAt: product.updatedAt || null
   };
-}
-
-function loadData() {
-  const savedProducts = localStorage.getItem("instabot_products_v1_github");
-  const savedInteractions = localStorage.getItem("instabot_interactions_v1_github");
-  products = savedProducts ? JSON.parse(savedProducts).map(normalizeProduct) : [];
-  interactions = savedInteractions ? JSON.parse(savedInteractions) : [];
 }
 
 els.saveProduct.addEventListener("click", saveProductHandler);
@@ -957,5 +1238,9 @@ els.importData.addEventListener("click", importJsonData);
 els.clearHistory.addEventListener("click", clearOnlyHistory);
 els.saveConfig.addEventListener("click", saveBotConfig);
 els.resetConfig.addEventListener("click", resetBotConfig);
+
+window.editProduct = editProduct;
+window.deleteProduct = deleteProduct;
+window.toggleProduct = toggleProduct;
 
 startApp();

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>InstaBot Ofertas</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div>
+        <h1>InstaBot Ofertas</h1>
+        <p>Painel visual para automação de comentários em Feed/Reels</p>
+      </div>
+
+      <div class="status-pill">
+        <span></span>
+        Modo simulação
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="bot">🤖 Bot de Ofertas</button>
+      <button class="tab-btn" data-tab="messages">💬 Mensagens</button>
+      <button class="tab-btn" data-tab="data">📦 Dados</button>
+      <button class="tab-btn" data-tab="config">⚙️ Configurações Instagram</button>
+    </nav>
+
+    <section id="tab-bot" class="tab-content active">
+      <section class="dashboard">
+        <div class="dash-card"><small>Produtos</small><strong id="dashTotalProducts">0</strong><span>Cadastrados</span></div>
+        <div class="dash-card"><small>Ativos</small><strong id="dashActiveProducts">0</strong><span>Prontos para enviar</span></div>
+        <div class="dash-card"><small>Comentários</small><strong id="dashComments">0</strong><span>Simulados</span></div>
+        <div class="dash-card"><small>Directs</small><strong id="dashDirects">0</strong><span>Enviados</span></div>
+        <div class="dash-card highlight"><small>Taxa de resposta</small><strong id="dashRate">0%</strong><span>Directs ÷ comentários</span></div>
+      </section>
+
+      <main class="grid">
+        <section class="card">
+          <div class="section-title">
+            <h2 id="formTitle">1. Cadastrar produto</h2>
+            <p>Cadastre produtos e vincule cada um ao ID do post ou reel.</p>
+          </div>
+
+          <div class="form">
+            <input id="editingId" type="hidden" />
+
+            <label>Nome do produto<input id="productName" type="text" placeholder="Ex: Fone Bluetooth Bose" /></label>
+
+            <div class="row">
+              <label>Plataforma
+                <select id="productPlatform">
+                  <option value="Shopee">Shopee</option>
+                  <option value="Mercado Livre">Mercado Livre</option>
+                  <option value="Amazon">Amazon</option>
+                  <option value="Outros">Outros</option>
+                </select>
+              </label>
+              <label>Categoria<input id="categoryName" type="text" placeholder="Ex: Eletrônicos, Casa, Beleza" /></label>
+            </div>
+
+            <div class="row">
+              <label>Preço antes<input id="oldPrice" type="text" placeholder="Ex: R$ 129,90" /></label>
+              <label>Preço atual<input id="newPrice" type="text" placeholder="Ex: R$ 59,90" /></label>
+            </div>
+
+            <label>Link afiliado<input id="productLink" type="text" placeholder="https://s.shopee.com.br/..." /></label>
+            <label>URL da imagem<input id="productImage" type="text" placeholder="Cole a URL da imagem do produto" /></label>
+
+            <div class="row">
+              <label>ID do post/reel<input id="postId" type="text" placeholder="Ex: POST-001" /></label>
+              <label>Palavras-chave<input id="keywords" type="text" placeholder="eu quero, quero, link, manda" /></label>
+            </div>
+
+            <div class="row">
+              <label>Cupom<input id="couponCode" type="text" placeholder="Ex: 20% OFF" /></label>
+              <label>Validade da oferta<input id="offerValidity" type="text" placeholder="Ex: só hoje, até 23:59" /></label>
+            </div>
+
+            <label>Benefício principal<input id="benefitText" type="text" placeholder="Ex: som potente, bateria longa e ótimo custo-benefício" /></label>
+
+            <label class="switch-row inline-switch"><input id="freeShipping" type="checkbox" /><span>Produto com frete grátis</span></label>
+
+            <label>Mensagem automática<textarea id="messageTemplate" rows="9"></textarea></label>
+            <label>Observações internas<textarea id="internalNotes" rows="4" placeholder="Ex: boa comissão, produto campeão, testar no grupo à noite"></textarea></label>
+
+            <div class="button-row">
+              <button id="saveProduct" class="btn primary">Salvar produto</button>
+              <button id="cancelEdit" class="btn ghost" type="button">Cancelar edição</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="section-title">
+            <h2>2. Simular comentário</h2>
+            <p>Digite o ID do post/reel e o comentário do cliente.</p>
+          </div>
+
+          <div class="simulator">
+            <label>ID do post/reel comentado<input id="simPostId" type="text" value="POST-001" /></label>
+            <label>Usuário<input id="commentUser" type="text" value="@renata.monteiro" /></label>
+            <label>Comentário<input id="commentText" type="text" value="eu quero" /></label>
+            <button id="simulateComment" class="btn secondary">Simular comentário</button>
+          </div>
+
+          <div class="preview-box">
+            <h3>Produto encontrado</h3>
+            <div id="matchedProduct" class="matched-empty">Nenhum comentário simulado ainda.</div>
+          </div>
+        </section>
+
+        <section class="card product-list-card">
+          <div class="section-title with-action">
+            <div>
+              <h2>3. Produtos cadastrados</h2>
+              <p>Esses são os produtos que o bot pode enviar no Direct.</p>
+            </div>
+            <button id="clearAll" class="btn danger small">Limpar tudo</button>
+          </div>
+
+          <div class="products-toolbar">
+            <label>Buscar produto<input id="productSearch" type="text" placeholder="Buscar por nome, ID do post, plataforma, categoria ou palavra-chave" /></label>
+            <label>Filtrar status
+              <select id="statusFilter">
+                <option value="all">Todos</option>
+                <option value="active">Ativos</option>
+                <option value="inactive">Inativos</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="productsList" class="products-list"></div>
+        </section>
+
+        <section class="card phone-card">
+          <div class="section-title">
+            <h2>4. Prévia do Direct</h2>
+            <p>Mensagem que o cliente receberia.</p>
+          </div>
+
+          <div class="phone">
+            <div class="phone-top"><div class="dot"></div><strong>Direct</strong></div>
+            <div id="directMessages" class="messages">
+              <div class="empty">Nenhuma mensagem enviada ainda.<br />Simule um comentário para testar.</div>
+            </div>
+          </div>
+
+          <button id="copyLastMessage" class="btn copy-btn" disabled>Copiar última mensagem gerada</button>
+        </section>
+
+        <section class="card log-card">
+          <div class="section-title">
+            <h2>5. Histórico do bot</h2>
+            <p>Registro das ações simuladas.</p>
+          </div>
+          <div id="botLog" class="log"><p class="muted">Aguardando comentários...</p></div>
+        </section>
+      </main>
+    </section>
+
+    <section id="tab-messages" class="tab-content">
+      <main class="messages-grid">
+        <section class="card">
+          <div class="section-title">
+            <h2>Gerador de mensagens</h2>
+            <p>Crie modelos prontos para usar no Direct do cliente.</p>
+          </div>
+
+          <div class="form">
+            <label>Produto<select id="messageProductSelect"></select></label>
+
+            <div class="row">
+              <label>Tom da mensagem
+                <select id="messageTone">
+                  <option value="short">Curta e direta</option>
+                  <option value="seller">Vendedora</option>
+                  <option value="warm">Carinhosa</option>
+                  <option value="urgent">Urgente</option>
+                </select>
+              </label>
+              <label>Cupom<input id="msgCoupon" type="text" placeholder="Ex: 20% OFF" /></label>
+            </div>
+
+            <div class="row">
+              <label>Validade<input id="msgValidity" type="text" placeholder="Ex: só hoje" /></label>
+              <label>Benefício<input id="msgBenefit" type="text" placeholder="Ex: prático, barato e útil no dia a dia" /></label>
+            </div>
+
+            <label class="switch-row inline-switch"><input id="msgFreeShipping" type="checkbox" /><span>Incluir frete grátis na mensagem</span></label>
+
+            <div class="button-row">
+              <button id="generateMessage" class="btn primary">Gerar mensagem</button>
+              <button id="applyGeneratedTemplate" class="btn secondary no-margin" type="button">Aplicar ao produto</button>
+            </div>
+
+            <label>Modelo gerado<textarea id="generatedTemplate" rows="12" placeholder="A mensagem gerada aparece aqui..."></textarea></label>
+            <div class="button-row"><button id="copyGeneratedTemplate" class="btn copy-btn" type="button">Copiar modelo</button></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="section-title">
+            <h2>Modelos rápidos</h2>
+            <p>Escolha um molde e depois ajuste do seu jeito.</p>
+          </div>
+
+          <div class="preset-list">
+            <button class="preset-btn" data-preset="short">⚡ Curto</button>
+            <button class="preset-btn" data-preset="seller">🛒 Vendedor</button>
+            <button class="preset-btn" data-preset="warm">💛 Carinhoso</button>
+            <button class="preset-btn" data-preset="urgent">⏰ Urgente</button>
+            <button class="preset-btn" data-preset="coupon">🎟️ Cupom</button>
+          </div>
+
+          <div class="preview-box">
+            <h3>Prévia da resposta pública</h3>
+            <p class="public-preview" id="publicReplyPreview">@cliente, te mandei o link no Direct 🛒</p>
+          </div>
+
+          <div class="variables-box">
+            <h3>Variáveis disponíveis</h3>
+            <div class="variable-item"><code>{{nome}}</code><span>Nome do cliente</span></div>
+            <div class="variable-item"><code>{{usuario}}</code><span>Usuário do Instagram</span></div>
+            <div class="variable-item"><code>{{produto}}</code><span>Nome do produto</span></div>
+            <div class="variable-item"><code>{{plataforma}}</code><span>Plataforma do produto</span></div>
+            <div class="variable-item"><code>{{categoria}}</code><span>Categoria do produto</span></div>
+            <div class="variable-item"><code>{{preco_antigo}}</code><span>Preço antes</span></div>
+            <div class="variable-item"><code>{{preco_atual}}</code><span>Preço atual</span></div>
+            <div class="variable-item"><code>{{cupom}}</code><span>Cupom cadastrado</span></div>
+            <div class="variable-item"><code>{{frete}}</code><span>Frete grátis, quando marcado</span></div>
+            <div class="variable-item"><code>{{validade}}</code><span>Validade da oferta</span></div>
+            <div class="variable-item"><code>{{beneficio}}</code><span>Benefício principal</span></div>
+            <div class="variable-item"><code>{{link}}</code><span>Link afiliado</span></div>
+          </div>
+        </section>
+      </main>
+    </section>
+
+    <section id="tab-data" class="tab-content">
+      <main class="data-grid">
+        <section class="card">
+          <div class="section-title">
+            <h2>Exportar dados</h2>
+            <p>Baixe seus produtos ou um backup completo do painel.</p>
+          </div>
+
+          <div class="data-actions">
+            <button id="exportProducts" class="btn primary">Baixar produtos JSON</button>
+            <button id="exportBackup" class="btn secondary no-margin">Baixar backup completo</button>
+            <button id="clearHistory" class="btn danger">Limpar somente histórico</button>
+          </div>
+
+          <div class="preview-box">
+            <h3>Resumo dos dados</h3>
+            <div class="data-summary">
+              <div><strong id="dataTotalProducts">0</strong><span>Produtos</span></div>
+              <div><strong id="dataTotalInteractions">0</strong><span>Interações</span></div>
+              <div><strong id="dataTotalDirects">0</strong><span>Directs</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="section-title">
+            <h2>Importar dados</h2>
+            <p>Cole um JSON exportado anteriormente para restaurar produtos ou backup completo.</p>
+          </div>
+
+          <div class="form">
+            <label>Tipo de importação
+              <select id="importMode">
+                <option value="products">Importar somente produtos</option>
+                <option value="backup">Importar backup completo</option>
+              </select>
+            </label>
+            <label>JSON para importar<textarea id="importJson" rows="12" placeholder="Cole aqui o JSON exportado"></textarea></label>
+            <button id="importData" class="btn primary">Importar JSON</button>
+          </div>
+
+          <div class="warning-box">⚠️ Ao importar, os dados atuais serão substituídos pelos dados do JSON colado.</div>
+        </section>
+
+        <section class="card log-card">
+          <div class="section-title">
+            <h2>Últimas interações salvas</h2>
+            <p>Visão rápida dos comentários simulados armazenados.</p>
+          </div>
+          <div id="interactionsPreview" class="interaction-list"></div>
+        </section>
+      </main>
+    </section>
+
+    <section id="tab-config" class="tab-content">
+      <main class="config-grid">
+        <section class="card">
+          <div class="section-title">
+            <h2>Configurações da conta Instagram</h2>
+            <p>Esses dados serão usados futuramente para conectar o bot na API oficial da Meta.</p>
+          </div>
+
+          <div class="config-status-box">
+            <div><strong id="connectionTitle">Modo simulação ativo</strong><p id="connectionText">Nenhuma conta real conectada ainda.</p></div>
+            <div id="connectionBadge" class="connection-badge simulation">Simulação</div>
+          </div>
+
+          <div class="form">
+            <div class="row">
+              <label>Nome da conta<input id="accountName" type="text" placeholder="Ex: Mina de Ofertas" /></label>
+              <label>Usuário do Instagram<input id="instagramUser" type="text" placeholder="@mina.de.ofertas" /></label>
+            </div>
+
+            <label>Instagram Business ID<input id="instagramBusinessId" type="text" placeholder="Ex: 17841400000000000" /></label>
+            <label>Page ID do Facebook<input id="facebookPageId" type="text" placeholder="Ex: 123456789000000" /></label>
+            <label>App ID da Meta<input id="metaAppId" type="text" placeholder="Ex: 987654321000000" /></label>
+            <label>Access Token<input id="accessToken" type="password" placeholder="Cole aqui futuramente o token da Meta" /></label>
+
+            <div class="row">
+              <label>Verify Token do Webhook<input id="verifyToken" type="text" placeholder="Token de verificação" /></label>
+              <label>Modo do bot
+                <select id="botMode"><option value="simulation">Simulação</option><option value="connected">Conectado</option></select>
+              </label>
+            </div>
+
+            <label>URL do Webhook<input id="webhookUrl" type="text" placeholder="https://seu-app.onrender.com/webhook" /></label>
+
+            <div class="switches">
+              <label class="switch-row"><input id="publicReply" type="checkbox" /><span>Responder comentário público com “te mandei no direct”</span></label>
+              <label class="switch-row"><input id="blockDuplicate" type="checkbox" /><span>Bloquear Direct duplicado para o mesmo cliente e produto</span></label>
+            </div>
+
+            <div class="button-row">
+              <button id="saveConfig" class="btn primary">Salvar configurações</button>
+              <button id="resetConfig" class="btn ghost-visible" type="button">Restaurar padrão</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="section-title">
+            <h2>Resumo da integração</h2>
+            <p>Checklist visual do que falta para ligar o Instagram real.</p>
+          </div>
+
+          <div class="checklist">
+            <div class="check-item" id="checkAccount">Conta Instagram profissional</div>
+            <div class="check-item" id="checkPage">Página Facebook vinculada</div>
+            <div class="check-item" id="checkApp">App Meta criado</div>
+            <div class="check-item" id="checkToken">Access Token configurado</div>
+            <div class="check-item" id="checkWebhook">Webhook URL configurada</div>
+          </div>
+
+          <div class="webhook-preview">
+            <h3>Webhook visual</h3>
+            <p>Quando formos para o Render, esse será o endereço que a Meta vai chamar:</p>
+            <code id="webhookPreview">https://seu-app.onrender.com/webhook</code>
+          </div>
+
+          <div class="warning-box">⚠️ Por enquanto isso é apenas visual. O envio real de Direct entra quando conectarmos Render + Supabase + API da Meta.</div>
+        </section>
+      </main>
+    </section>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -203,7 +203,9 @@ function fromDbConfig(row = {}) {
   };
 }
 
-function fromDbWebhookEvent(row = {}) {
+function fromDbWebhookEvent(row = {}, productMap = {}) {
+  const productNameFromPayload = row.payload?.produto_nome || row.payload?.product?.name || row.payload?.produto?.nome || null;
+
   return {
     id: row.id,
     source: row.origem,
@@ -214,6 +216,7 @@ function fromDbWebhookEvent(row = {}) {
     comment: row.comentario_texto,
     matched: row.produto_encontrado,
     safeMode: row.modo_seguro,
+    productName: productMap[row.instagram_media_id] || productNameFromPayload || null,
     payload: row.payload,
     createdAt: row.created_at
   };
@@ -252,7 +255,10 @@ async function insertWebhookEvent(event) {
     comentario_texto: event.comment || "",
     produto_encontrado: Boolean(event.matched),
     modo_seguro: event.safeMode !== false,
-    payload: event.payload || {}
+    payload: {
+      ...(event.payload || {}),
+      produto_nome: event.productName || event.payload?.produto_nome || null
+    }
   };
 
   const { data, error } = await supabase
@@ -352,6 +358,7 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
         username,
         comment,
         matched: true,
+        productName: product.name,
         safeMode,
         payload: rawPayload
       });
@@ -402,6 +409,7 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
     username,
     comment,
     matched: true,
+    productName: product.name,
     safeMode,
     payload: rawPayload
   });
@@ -600,7 +608,33 @@ app.get("/api/webhook-eventos", ensureSupabase, async (req, res) => {
     .limit(25);
 
   if (error) return res.json([]);
-  res.json(data.map(fromDbWebhookEvent));
+
+  const mediaIds = [...new Set((data || []).map((event) => event.instagram_media_id).filter(Boolean))];
+  let productMap = {};
+
+  if (mediaIds.length) {
+    const { data: productRows } = await supabase
+      .from("produtos")
+      .select("instagram_media_id,nome")
+      .in("instagram_media_id", mediaIds);
+
+    productMap = (productRows || []).reduce((map, product) => {
+      map[product.instagram_media_id] = product.nome;
+      return map;
+    }, {});
+  }
+
+  res.json(data.map((row) => fromDbWebhookEvent(row, productMap)));
+});
+
+app.delete("/api/webhook-eventos", ensureSupabase, async (req, res) => {
+  const { error } = await supabase
+    .from("webhook_eventos")
+    .delete()
+    .not("id", "is", null);
+
+  if (error) return res.status(500).json({ ok: false, error: error.message });
+  res.json({ ok: true });
 });
 
 app.post("/api/simular-comentario", ensureSupabase, async (req, res) => {

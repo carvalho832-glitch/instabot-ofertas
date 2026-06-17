@@ -85,6 +85,24 @@
       display: block;
     }
 
+    .button-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 2px;
+    }
+
+    .btn-soft {
+      background: rgba(255,255,255,.10);
+      border: 1px solid rgba(255,255,255,.12);
+    }
+
+    .btn-danger {
+      background: rgba(255, 82, 117, .18);
+      border: 1px solid rgba(255, 82, 117, .26);
+      color: #ffd5df;
+    }
+
     button:disabled { opacity: .55; cursor: not-allowed; }
 
     .summary {
@@ -129,16 +147,32 @@
       line-height: 1.35;
     }
 
+    .message-title {
+      margin: 16px 0 8px;
+      color: #f4eefe;
+      font-weight: 900;
+    }
+
     .message-preview {
-      margin-top: 12px;
       padding: 15px;
       border-radius: 18px;
       background: #1e1c31;
       color: #fff;
       line-height: 1.45;
       white-space: pre-wrap;
-      max-height: 280px;
+      max-height: 360px;
       overflow: auto;
+      border: 1px solid rgba(255,255,255,.09);
+    }
+
+    .safe-note {
+      margin-top: 10px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(157,255,195,.10);
+      color: #9dffc3;
+      font-weight: 900;
+      line-height: 1.35;
     }
 
     details {
@@ -185,6 +219,12 @@
     .loading-box.visible { display: block; }
     .links { margin-top: 18px; display: grid; gap: 10px; }
     a { color: #a8d8ff; text-decoration: none; font-weight: 800; }
+
+    @media (max-width: 520px) {
+      body { padding: 14px; }
+      .card { padding: 20px; border-radius: 24px; }
+      .button-row { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -200,6 +240,11 @@
       <label>Usuário
         <input id="username" value="@cliente.meta" />
       </label>
+
+      <div class="button-row">
+        <button id="randomUser" class="btn-soft" type="button">Gerar usuário aleatório</button>
+        <button id="clearHistory" class="btn-danger" type="button">Limpar histórico de teste</button>
+      </div>
 
       <label>Comentário
         <input id="comment" value="eu quero" />
@@ -219,7 +264,9 @@
           <div class="summary-item"><small>Modo seguro</small><strong id="sumSafe">--</strong></div>
         </div>
 
+        <div class="message-title">Mensagem gerada</div>
         <div class="message-preview" id="messagePreview">Mensagem gerada aparecerá aqui.</div>
+        <div class="safe-note" id="safeNote">Modo seguro ativo: nenhum Direct real foi enviado.</div>
       </div>
 
       <details id="technicalDetails">
@@ -237,6 +284,8 @@
 
   <script>
     const button = document.getElementById("sendTest");
+    const randomUserBtn = document.getElementById("randomUser");
+    const clearHistoryBtn = document.getElementById("clearHistory");
     const result = document.getElementById("result");
     const loading = document.getElementById("loading");
     const summary = document.getElementById("summary");
@@ -247,10 +296,19 @@
     const sumProduct = document.getElementById("sumProduct");
     const sumSafe = document.getElementById("sumSafe");
     const messagePreview = document.getElementById("messagePreview");
+    const safeNote = document.getElementById("safeNote");
     const technicalDetails = document.getElementById("technicalDetails");
 
     function firstResult(data) {
       return data && Array.isArray(data.results) && data.results.length ? data.results[0] : null;
+    }
+
+    function generateUser() {
+      const words = ["oferta", "cliente", "teste", "promo", "achado", "meta", "direct", "link"];
+      const first = words[Math.floor(Math.random() * words.length)];
+      const second = words[Math.floor(Math.random() * words.length)];
+      const number = Math.floor(1000 + Math.random() * 9000);
+      document.getElementById("username").value = `@${first}.${second}${number}`;
     }
 
     function renderSummary(data) {
@@ -266,17 +324,56 @@
         sumProduct.textContent = "--";
         sumSafe.textContent = "--";
         messagePreview.textContent = "Confira os detalhes técnicos no JSON.";
+        safeNote.textContent = "Nenhum envio real foi realizado.";
         return;
       }
 
-      summaryTitle.textContent = item && item.matched ? "✅ Webhook recebido e produto encontrado" : "⚠️ Webhook recebido, sem produto encontrado";
+      const isDuplicate = Boolean(item?.duplicate);
+      const hasMessage = Boolean(item?.message);
+
+      summaryTitle.textContent = item && item.matched
+        ? isDuplicate ? "⚠️ Webhook recebido, Direct duplicado bloqueado" : "✅ Webhook recebido e produto encontrado"
+        : "⚠️ Webhook recebido, sem produto encontrado";
+
       sumStatus.textContent = data.received ? "Evento recebido pelo backend" : "Evento não confirmado";
       sumUser.textContent = item?.interaction?.username || document.getElementById("username").value.trim() || "@cliente";
       sumComment.textContent = item?.interaction?.comment || document.getElementById("comment").value.trim() || "--";
       sumProduct.textContent = item?.product?.name || "Nenhum produto encontrado";
       sumSafe.textContent = data.safeMode || item?.safeMode ? "Ativo, sem Direct real" : "Desativado";
-      messagePreview.textContent = item?.message || item?.reason || "Nenhuma mensagem foi gerada.";
+      messagePreview.textContent = hasMessage ? item.message : (item?.reason || "Nenhuma mensagem foi gerada.");
+      safeNote.textContent = data.safeMode || item?.safeMode
+        ? "Modo seguro ativo: nenhum Direct real foi enviado."
+        : "Modo seguro desativado.";
     }
+
+    async function clearHistory() {
+      if (!confirm("Limpar histórico de interações? Isso também libera os testes duplicados.")) return;
+
+      clearHistoryBtn.disabled = true;
+      result.textContent = "Limpando histórico de interações...";
+
+      try {
+        const response = await fetch("/api/interacoes", { method: "DELETE" });
+        const data = await response.json();
+        result.textContent = JSON.stringify(data, null, 2);
+        summary.classList.add("visible");
+        summaryTitle.textContent = "🧹 Histórico limpo";
+        sumStatus.textContent = "Interações apagadas";
+        sumUser.textContent = "Duplicados liberados";
+        sumComment.textContent = "--";
+        sumProduct.textContent = "Contadores zerados";
+        sumSafe.textContent = "Sem envio real";
+        messagePreview.textContent = "Agora você pode testar novamente com o mesmo usuário sem bloquear por duplicado.";
+        safeNote.textContent = "Limpeza feita somente no histórico de interações.";
+      } catch (error) {
+        result.textContent = "Erro: " + error.message;
+      } finally {
+        clearHistoryBtn.disabled = false;
+      }
+    }
+
+    randomUserBtn.addEventListener("click", generateUser);
+    clearHistoryBtn.addEventListener("click", clearHistory);
 
     button.addEventListener("click", async () => {
       button.disabled = true;

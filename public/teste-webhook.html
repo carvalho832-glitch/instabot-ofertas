@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teste Webhook Meta - InstaBot Ofertas</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #100b17;
+      color: #fff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(255, 49, 144, .22), transparent 35%),
+        radial-gradient(circle at top right, rgba(86, 117, 255, .20), transparent 35%),
+        #100b17;
+      padding: 22px;
+    }
+
+    main {
+      width: min(720px, 100%);
+      margin: 0 auto;
+    }
+
+    .card {
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 28px;
+      padding: 22px;
+      box-shadow: 0 18px 50px rgba(0,0,0,.35);
+      backdrop-filter: blur(18px);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(28px, 8vw, 44px);
+      line-height: 1.05;
+    }
+
+    p {
+      color: #d6d1df;
+      line-height: 1.5;
+      margin: 0 0 18px;
+    }
+
+    label {
+      display: block;
+      margin: 14px 0;
+      color: #eee8ff;
+      font-weight: 700;
+    }
+
+    input {
+      width: 100%;
+      margin-top: 8px;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 16px;
+      padding: 15px 16px;
+      background: rgba(0,0,0,.28);
+      color: #fff;
+      font-size: 16px;
+      outline: none;
+    }
+
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 999px;
+      padding: 16px;
+      margin-top: 12px;
+      font-size: 17px;
+      font-weight: 900;
+      color: #fff;
+      background: linear-gradient(90deg, #ff2e92, #ff7a59);
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    .result {
+      margin-top: 18px;
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 18px;
+      padding: 16px;
+      min-height: 130px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      color: #d9fff0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .ok { color: #9dffc3; }
+    .warn { color: #ffe09d; }
+    .links { margin-top: 18px; display: grid; gap: 10px; }
+    a { color: #a8d8ff; text-decoration: none; font-weight: 800; }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <h1>🧪 Teste Webhook Meta</h1>
+      <p>Esta página envia um evento falso como se a Meta/Instagram tivesse mandado um comentário real para o bot. O envio continua em modo seguro, sem Direct real.</p>
+
+      <label>ID do post/reel
+        <input id="postId" value="POST-001" />
+      </label>
+
+      <label>Usuário
+        <input id="username" value="@cliente.meta" />
+      </label>
+
+      <label>Comentário
+        <input id="comment" value="eu quero" />
+      </label>
+
+      <button id="sendTest">Enviar teste para /api/testar-webhook-meta</button>
+
+      <div id="result" class="result">Aguardando teste...</div>
+
+      <div class="links">
+        <a href="/">← Voltar para o painel</a>
+        <a href="/api/webhook-eventos" target="_blank">Ver eventos de webhook salvos</a>
+        <a href="/health" target="_blank">Ver health</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const button = document.getElementById("sendTest");
+    const result = document.getElementById("result");
+
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      result.textContent = "Enviando evento fake da Meta...";
+
+      try {
+        const response = await fetch("/api/testar-webhook-meta", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            postId: document.getElementById("postId").value.trim(),
+            username: document.getElementById("username").value.trim(),
+            comment: document.getElementById("comment").value.trim()
+          })
+        });
+
+        const data = await response.json();
+        result.textContent = JSON.stringify(data, null, 2);
+      } catch (error) {
+        result.textContent = "Erro: " + error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

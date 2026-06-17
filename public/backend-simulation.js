@@ -1,7 +1,18 @@
 (() => {
+  const statusScript = document.createElement("script");
+  statusScript.src = "backend-status.js";
+  statusScript.defer = true;
+  document.body.appendChild(statusScript);
+
   const button = document.getElementById("simulateComment");
 
   if (!button) return;
+
+  function updateMotorStatus(username, result) {
+    if (window.markMotorBackendSimulation) {
+      window.markMotorBackendSimulation(username, result);
+    }
+  }
 
   button.addEventListener(
     "click",
@@ -38,6 +49,7 @@
 
         await loadData();
         renderAll();
+        updateMotorStatus(username, result);
 
         if (!result.matched) {
           els.matchedProduct.innerHTML = result.reason || "Nenhum produto ativo encontrou esse ID + palavra-chave.";

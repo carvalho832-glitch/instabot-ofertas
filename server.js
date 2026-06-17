@@ -38,7 +38,7 @@ Vi seu comentário e separei o produto pra você:
 Qualquer dúvida, me chama aqui 💬`;
 
 app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "3mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 function ensureSupabase(req, res, next) {
@@ -203,6 +203,22 @@ function fromDbConfig(row = {}) {
   };
 }
 
+function fromDbWebhookEvent(row = {}) {
+  return {
+    id: row.id,
+    source: row.origem,
+    eventType: row.tipo_evento,
+    mediaId: row.instagram_media_id,
+    commentId: row.instagram_comment_id,
+    username: row.instagram_username,
+    comment: row.comentario_texto,
+    matched: row.produto_encontrado,
+    safeMode: row.modo_seguro,
+    payload: row.payload,
+    createdAt: row.created_at
+  };
+}
+
 async function getBotConfig() {
   const { data } = await supabase
     .from("configuracoes")
@@ -226,12 +242,219 @@ async function insertInteraction(interaction) {
   return fromDbInteraction(data);
 }
 
+async function insertWebhookEvent(event) {
+  const payload = {
+    origem: event.source || "webhook",
+    tipo_evento: event.eventType || "comment",
+    instagram_media_id: event.postId || null,
+    instagram_comment_id: event.commentId || null,
+    instagram_username: event.username || "",
+    comentario_texto: event.comment || "",
+    produto_encontrado: Boolean(event.matched),
+    modo_seguro: event.safeMode !== false,
+    payload: event.payload || {}
+  };
+
+  const { data, error } = await supabase
+    .from("webhook_eventos")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (error) {
+    console.warn("webhook_eventos não gravado:", error.message);
+    return null;
+  }
+
+  return fromDbWebhookEvent(data);
+}
+
+async function runCommentEngine({ postId, username, comment, commentId = null, userId = null, source = "simulation", safeMode = true, rawPayload = {} }) {
+  const config = await getBotConfig();
+
+  const { data: rows, error: productError } = await supabase
+    .from("produtos")
+    .select("*")
+    .eq("ativo", true)
+    .eq("instagram_media_id", postId);
+
+  if (productError) throw productError;
+
+  const matchedRow = (rows || []).find((row) => commentHasKeyword(comment, row.palavras_chave || []));
+
+  if (!matchedRow) {
+    const interaction = await insertInteraction({
+      username,
+      instagramUserId: userId,
+      commentId,
+      postId,
+      comment,
+      directSent: false,
+      reason: source === "webhook" ? "Webhook recebido, nenhum produto encontrado" : "Nenhum produto encontrado"
+    });
+
+    const event = await insertWebhookEvent({
+      source,
+      eventType: "comment",
+      postId,
+      commentId,
+      username,
+      comment,
+      matched: false,
+      safeMode,
+      payload: rawPayload
+    });
+
+    return {
+      ok: true,
+      matched: false,
+      duplicate: false,
+      message: null,
+      product: null,
+      interaction,
+      webhookEvent: event,
+      publicReply: false,
+      safeMode,
+      reason: "Nenhum produto ativo encontrou esse ID + palavra-chave."
+    };
+  }
+
+  const product = fromDbProduct(matchedRow);
+
+  if (config.blockDuplicate) {
+    const { data: duplicateRows, error: duplicateError } = await supabase
+      .from("interacoes")
+      .select("id")
+      .eq("produto_id", product.id)
+      .eq("instagram_username", username)
+      .eq("direct_enviado", true)
+      .limit(1);
+
+    if (duplicateError) throw duplicateError;
+
+    if (duplicateRows?.length) {
+      const interaction = await insertInteraction({
+        productId: product.id,
+        username,
+        instagramUserId: userId,
+        commentId,
+        postId,
+        comment,
+        directSent: false,
+        reason: "Direct duplicado bloqueado"
+      });
+
+      const event = await insertWebhookEvent({
+        source,
+        eventType: "comment_duplicate",
+        postId,
+        commentId,
+        username,
+        comment,
+        matched: true,
+        safeMode,
+        payload: rawPayload
+      });
+
+      return {
+        ok: true,
+        matched: true,
+        duplicate: true,
+        message: null,
+        product,
+        interaction,
+        webhookEvent: event,
+        publicReply: false,
+        safeMode,
+        reason: "Direct duplicado bloqueado"
+      };
+    }
+  }
+
+  const message = buildDirectMessage(product, username);
+
+  const interaction = await insertInteraction({
+    productId: product.id,
+    username,
+    instagramUserId: userId,
+    commentId,
+    postId,
+    comment,
+    directSent: true,
+    reason: safeMode ? "Mensagem gerada em modo seguro" : "Mensagem enviada pelo motor backend"
+  });
+
+  const nextDirects = Number(product.directs || 0) + 1;
+  const { data: updatedProductRow, error: updateError } = await supabase
+    .from("produtos")
+    .update({ directs_enviados: nextDirects, updated_at: new Date().toISOString() })
+    .eq("id", product.id)
+    .select("*")
+    .single();
+
+  if (updateError) throw updateError;
+
+  const event = await insertWebhookEvent({
+    source,
+    eventType: safeMode ? "comment_safe_mode" : "comment_processed",
+    postId,
+    commentId,
+    username,
+    comment,
+    matched: true,
+    safeMode,
+    payload: rawPayload
+  });
+
+  return {
+    ok: true,
+    matched: true,
+    duplicate: false,
+    message,
+    product: fromDbProduct(updatedProductRow),
+    interaction,
+    webhookEvent: event,
+    publicReply: Boolean(config.publicReply),
+    safeMode,
+    reason: safeMode ? "Webhook processado em modo seguro, sem envio real." : "Mensagem gerada pelo motor backend"
+  };
+}
+
+function extractInstagramComments(payload = {}) {
+  const events = [];
+
+  for (const entry of payload.entry || []) {
+    for (const change of entry.changes || []) {
+      const value = change.value || {};
+      const text = value.text || value.comment_text || value.message || "";
+      const postId = value.media_id || value.media?.id || value.post_id || value.id || "";
+      const username = value.from?.username || value.username || value.from?.name || "@cliente";
+      const userId = value.from?.id || value.user_id || null;
+      const commentId = value.comment_id || value.id || null;
+
+      if (text && postId) {
+        events.push({
+          postId: String(postId),
+          username: String(username).startsWith("@") ? String(username) : `@${username}`,
+          comment: String(text),
+          commentId: commentId ? String(commentId) : null,
+          userId: userId ? String(userId) : null,
+          field: change.field || "comments"
+        });
+      }
+    }
+  }
+
+  return events;
+}
+
 app.get("/health", (req, res) => {
   res.json({
     ok: true,
     name: "instabot-ofertas",
     mode: BOT_MODE,
     database: supabase ? "configured" : "missing",
+    webhook: "ready",
     timestamp: new Date().toISOString()
   });
 });
@@ -240,7 +463,8 @@ app.get("/api/status", (req, res) => {
   res.json({
     app: "InstaBot Ofertas",
     mode: BOT_MODE,
-    database: supabase ? "configured" : "missing"
+    database: supabase ? "configured" : "missing",
+    webhook: "ready"
   });
 });
 
@@ -368,6 +592,17 @@ app.post("/api/configuracoes", ensureSupabase, async (req, res) => {
   res.json(fromDbConfig(data));
 });
 
+app.get("/api/webhook-eventos", ensureSupabase, async (req, res) => {
+  const { data, error } = await supabase
+    .from("webhook_eventos")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(25);
+
+  if (error) return res.json([]);
+  res.json(data.map(fromDbWebhookEvent));
+});
+
 app.post("/api/simular-comentario", ensureSupabase, async (req, res) => {
   try {
     const postId = String(req.body.postId || "").trim();
@@ -378,110 +613,52 @@ app.post("/api/simular-comentario", ensureSupabase, async (req, res) => {
       return res.status(400).json({ ok: false, message: "Informe postId, username e comment." });
     }
 
-    const config = await getBotConfig();
-
-    const { data: rows, error: productError } = await supabase
-      .from("produtos")
-      .select("*")
-      .eq("ativo", true)
-      .eq("instagram_media_id", postId);
-
-    if (productError) throw productError;
-
-    const matchedRow = (rows || []).find((row) => commentHasKeyword(comment, row.palavras_chave || []));
-
-    if (!matchedRow) {
-      const interaction = await insertInteraction({
-        username,
-        postId,
-        comment,
-        directSent: false,
-        reason: "Nenhum produto encontrado"
-      });
-
-      return res.json({
-        ok: true,
-        matched: false,
-        duplicate: false,
-        message: null,
-        product: null,
-        interaction,
-        publicReply: false,
-        reason: "Nenhum produto ativo encontrou esse ID + palavra-chave."
-      });
-    }
-
-    const product = fromDbProduct(matchedRow);
-
-    if (config.blockDuplicate) {
-      const { data: duplicateRows, error: duplicateError } = await supabase
-        .from("interacoes")
-        .select("id")
-        .eq("produto_id", product.id)
-        .eq("instagram_username", username)
-        .eq("direct_enviado", true)
-        .limit(1);
-
-      if (duplicateError) throw duplicateError;
-
-      if (duplicateRows?.length) {
-        const interaction = await insertInteraction({
-          productId: product.id,
-          username,
-          postId,
-          comment,
-          directSent: false,
-          reason: "Direct duplicado bloqueado"
-        });
-
-        return res.json({
-          ok: true,
-          matched: true,
-          duplicate: true,
-          message: null,
-          product,
-          interaction,
-          publicReply: false,
-          reason: "Direct duplicado bloqueado"
-        });
-      }
-    }
-
-    const message = buildDirectMessage(product, username);
-
-    const interaction = await insertInteraction({
-      productId: product.id,
-      username,
+    const result = await runCommentEngine({
       postId,
+      username,
       comment,
-      directSent: true,
-      reason: "Mensagem enviada pelo motor backend"
+      source: "simulation",
+      safeMode: false,
+      rawPayload: { postId, username, comment }
     });
 
-    const nextDirects = Number(product.directs || 0) + 1;
-    const { data: updatedProductRow, error: updateError } = await supabase
-      .from("produtos")
-      .update({ directs_enviados: nextDirects, updated_at: new Date().toISOString() })
-      .eq("id", product.id)
-      .select("*")
-      .single();
-
-    if (updateError) throw updateError;
-
-    return res.json({
-      ok: true,
-      matched: true,
-      duplicate: false,
-      message,
-      product: fromDbProduct(updatedProductRow),
-      interaction,
-      publicReply: Boolean(config.publicReply),
-      reason: "Mensagem gerada pelo motor backend"
-    });
+    return res.json(result);
   } catch (error) {
     console.error("Erro na simulação backend:", error);
     return res.status(500).json({ ok: false, error: error.message });
   }
+});
+
+app.post("/api/testar-webhook-meta", ensureSupabase, async (req, res) => {
+  const postId = String(req.body.postId || "POST-001").trim();
+  const username = String(req.body.username || "@cliente.meta").trim();
+  const comment = String(req.body.comment || "eu quero").trim();
+
+  req.body = {
+    object: "instagram",
+    entry: [
+      {
+        id: "IG_BUSINESS_TEST",
+        time: Date.now(),
+        changes: [
+          {
+            field: "comments",
+            value: {
+              id: "COMMENT_TEST_" + Date.now(),
+              media_id: postId,
+              text: comment,
+              from: {
+                id: "USER_TEST",
+                username: username.replace("@", "")
+              }
+            }
+          }
+        ]
+      }
+    ]
+  };
+
+  return processWebhookPayload(req, res, true);
 });
 
 app.get("/webhook", (req, res) => {
@@ -496,10 +673,54 @@ app.get("/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
-app.post("/webhook", (req, res) => {
-  console.log("Evento recebido:", JSON.stringify(req.body, null, 2));
-  res.sendStatus(200);
-});
+async function processWebhookPayload(req, res, isInternalTest = false) {
+  try {
+    if (!supabase) return res.sendStatus(200);
+
+    const comments = extractInstagramComments(req.body);
+    const results = [];
+
+    if (!comments.length) {
+      await insertWebhookEvent({
+        source: isInternalTest ? "webhook_test" : "webhook",
+        eventType: "raw_event_no_comment",
+        safeMode: true,
+        matched: false,
+        payload: req.body
+      });
+
+      return res.status(200).json({ ok: true, received: true, comments: 0, results: [] });
+    }
+
+    for (const item of comments) {
+      const result = await runCommentEngine({
+        postId: item.postId,
+        username: item.username,
+        comment: item.comment,
+        commentId: item.commentId,
+        userId: item.userId,
+        source: isInternalTest ? "webhook_test" : "webhook",
+        safeMode: true,
+        rawPayload: req.body
+      });
+
+      results.push(result);
+    }
+
+    return res.status(200).json({
+      ok: true,
+      received: true,
+      comments: comments.length,
+      safeMode: true,
+      results
+    });
+  } catch (error) {
+    console.error("Erro no webhook:", error);
+    return res.status(200).json({ ok: false, received: true, error: error.message });
+  }
+}
+
+app.post("/webhook", (req, res) => processWebhookPayload(req, res, false));
 
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));

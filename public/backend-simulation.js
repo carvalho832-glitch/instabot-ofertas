@@ -4,6 +4,11 @@
   statusScript.defer = true;
   document.body.appendChild(statusScript);
 
+  const webhookEventsScript = document.createElement("script");
+  webhookEventsScript.src = "webhook-events-panel.js";
+  webhookEventsScript.defer = true;
+  document.body.appendChild(webhookEventsScript);
+
   const button = document.getElementById("simulateComment");
 
   if (!button) return;

@@ -21,7 +21,7 @@
         radial-gradient(circle at top left, rgba(255, 49, 144, .22), transparent 35%),
         radial-gradient(circle at top right, rgba(86, 117, 255, .20), transparent 35%),
         #100b17;
-      padding: 18px;
+      padding: 14px;
     }
 
     main {
@@ -32,8 +32,8 @@
     .card {
       background: rgba(255,255,255,.08);
       border: 1px solid rgba(255,255,255,.12);
-      border-radius: 28px;
-      padding: 22px;
+      border-radius: 26px;
+      padding: 20px;
       box-shadow: 0 18px 50px rgba(0,0,0,.35);
       backdrop-filter: blur(18px);
     }
@@ -54,7 +54,7 @@
       display: block;
       margin: 14px 0;
       color: #eee8ff;
-      font-weight: 700;
+      font-weight: 800;
     }
 
     input {
@@ -69,21 +69,21 @@
       outline: none;
     }
 
-    button, .button-link {
+    button {
       width: 100%;
       border: 0;
       border-radius: 999px;
       padding: 16px;
       margin-top: 12px;
-      font-size: 17px;
+      font-size: 16px;
       font-weight: 900;
       color: #fff;
       background: linear-gradient(90deg, #ff2e92, #ff7a59);
       cursor: pointer;
       text-align: center;
-      text-decoration: none;
-      display: block;
     }
+
+    button:disabled { opacity: .55; cursor: not-allowed; }
 
     .button-row {
       display: grid;
@@ -93,17 +93,27 @@
     }
 
     .btn-soft {
-      background: rgba(255,255,255,.10);
-      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.11);
+      border: 1px solid rgba(255,255,255,.13);
     }
 
     .btn-danger {
-      background: rgba(255, 82, 117, .18);
-      border: 1px solid rgba(255, 82, 117, .26);
+      background: rgba(255, 82, 117, .20);
+      border: 1px solid rgba(255, 82, 117, .28);
       color: #ffd5df;
     }
 
-    button:disabled { opacity: .55; cursor: not-allowed; }
+    .loading-box {
+      margin-top: 16px;
+      padding: 15px;
+      border-radius: 18px;
+      background: rgba(255,224,157,.12);
+      color: #ffe09d;
+      display: none;
+      font-weight: 900;
+    }
+
+    .loading-box.visible { display: block; }
 
     .summary {
       display: none;
@@ -111,7 +121,7 @@
       border-radius: 22px;
       padding: 18px;
       background: rgba(0,0,0,.32);
-      border: 1px solid rgba(157,255,195,.2);
+      border: 1px solid rgba(157,255,195,.22);
     }
 
     .summary.visible { display: block; }
@@ -119,6 +129,7 @@
     .summary h2 {
       margin: 0 0 14px;
       font-size: 24px;
+      line-height: 1.18;
     }
 
     .summary-grid {
@@ -137,7 +148,7 @@
       display: block;
       color: #bfb9cb;
       margin-bottom: 5px;
-      font-weight: 800;
+      font-weight: 900;
     }
 
     .summary-item strong {
@@ -145,24 +156,25 @@
       color: #9dffc3;
       font-size: 17px;
       line-height: 1.35;
+      word-break: break-word;
     }
 
-    .message-title {
-      margin: 16px 0 8px;
-      color: #f4eefe;
-      font-weight: 900;
-    }
-
-    .message-preview {
+    .message-box {
+      margin-top: 14px;
       padding: 15px;
       border-radius: 18px;
       background: #1e1c31;
       color: #fff;
       line-height: 1.45;
       white-space: pre-wrap;
-      max-height: 360px;
-      overflow: auto;
       border: 1px solid rgba(255,255,255,.09);
+      overflow-wrap: anywhere;
+    }
+
+    .message-box-title {
+      margin: 16px 0 8px;
+      color: #f4eefe;
+      font-weight: 900;
     }
 
     .safe-note {
@@ -195,7 +207,6 @@
       background: rgba(0,0,0,.35);
       border-top: 1px solid rgba(255,255,255,.10);
       padding: 16px;
-      min-height: 130px;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       color: #d9fff0;
@@ -206,23 +217,10 @@
       overflow: auto;
     }
 
-    .loading-box {
-      margin-top: 16px;
-      padding: 15px;
-      border-radius: 18px;
-      background: rgba(255,224,157,.12);
-      color: #ffe09d;
-      display: none;
-      font-weight: 800;
-    }
-
-    .loading-box.visible { display: block; }
     .links { margin-top: 18px; display: grid; gap: 10px; }
-    a { color: #a8d8ff; text-decoration: none; font-weight: 800; }
+    a { color: #a8d8ff; text-decoration: none; font-weight: 900; }
 
     @media (max-width: 520px) {
-      body { padding: 14px; }
-      .card { padding: 20px; border-radius: 24px; }
       .button-row { grid-template-columns: 1fr; }
     }
   </style>
@@ -253,21 +251,7 @@
       <button id="sendTest">Enviar teste para /api/testar-webhook-meta</button>
 
       <div id="loading" class="loading-box">Enviando evento fake da Meta...</div>
-
-      <div id="summary" class="summary">
-        <h2 id="summaryTitle">✅ Webhook recebido</h2>
-        <div class="summary-grid">
-          <div class="summary-item"><small>Status</small><strong id="sumStatus">--</strong></div>
-          <div class="summary-item"><small>Cliente</small><strong id="sumUser">--</strong></div>
-          <div class="summary-item"><small>Comentário</small><strong id="sumComment">--</strong></div>
-          <div class="summary-item"><small>Produto</small><strong id="sumProduct">--</strong></div>
-          <div class="summary-item"><small>Modo seguro</small><strong id="sumSafe">--</strong></div>
-        </div>
-
-        <div class="message-title">Mensagem gerada</div>
-        <div class="message-preview" id="messagePreview">Mensagem gerada aparecerá aqui.</div>
-        <div class="safe-note" id="safeNote">Modo seguro ativo: nenhum Direct real foi enviado.</div>
-      </div>
+      <div id="summary" class="summary"></div>
 
       <details id="technicalDetails">
         <summary>Ver detalhes técnicos JSON</summary>
@@ -289,15 +273,17 @@
     const result = document.getElementById("result");
     const loading = document.getElementById("loading");
     const summary = document.getElementById("summary");
-    const summaryTitle = document.getElementById("summaryTitle");
-    const sumStatus = document.getElementById("sumStatus");
-    const sumUser = document.getElementById("sumUser");
-    const sumComment = document.getElementById("sumComment");
-    const sumProduct = document.getElementById("sumProduct");
-    const sumSafe = document.getElementById("sumSafe");
-    const messagePreview = document.getElementById("messagePreview");
-    const safeNote = document.getElementById("safeNote");
     const technicalDetails = document.getElementById("technicalDetails");
+
+    function escapeHtml(value) {
+      return String(value || "").replace(/[&<>"']/g, (match) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      }[match]));
+    }
 
     function firstResult(data) {
       return data && Array.isArray(data.results) && data.results.length ? data.results[0] : null;
@@ -317,33 +303,43 @@
       technicalDetails.open = false;
 
       if (!data || !data.ok) {
-        summaryTitle.textContent = "⚠️ Webhook recebido com alerta";
-        sumStatus.textContent = data && data.error ? data.error : "Erro ao processar";
-        sumUser.textContent = "--";
-        sumComment.textContent = "--";
-        sumProduct.textContent = "--";
-        sumSafe.textContent = "--";
-        messagePreview.textContent = "Confira os detalhes técnicos no JSON.";
-        safeNote.textContent = "Nenhum envio real foi realizado.";
+        summary.innerHTML = `
+          <h2>⚠️ Webhook recebido com alerta</h2>
+          <div class="summary-grid">
+            <div class="summary-item"><small>Status</small><strong>${escapeHtml(data?.error || "Erro ao processar")}</strong></div>
+          </div>
+          <div class="message-box-title">Mensagem</div>
+          <div class="message-box">Confira os detalhes técnicos no JSON.</div>
+          <div class="safe-note">Nenhum envio real foi realizado.</div>
+        `;
         return;
       }
 
       const isDuplicate = Boolean(item?.duplicate);
-      const hasMessage = Boolean(item?.message);
-
-      summaryTitle.textContent = item && item.matched
+      const matched = Boolean(item?.matched);
+      const title = matched
         ? isDuplicate ? "⚠️ Webhook recebido, Direct duplicado bloqueado" : "✅ Webhook recebido e produto encontrado"
         : "⚠️ Webhook recebido, sem produto encontrado";
 
-      sumStatus.textContent = data.received ? "Evento recebido pelo backend" : "Evento não confirmado";
-      sumUser.textContent = item?.interaction?.username || document.getElementById("username").value.trim() || "@cliente";
-      sumComment.textContent = item?.interaction?.comment || document.getElementById("comment").value.trim() || "--";
-      sumProduct.textContent = item?.product?.name || "Nenhum produto encontrado";
-      sumSafe.textContent = data.safeMode || item?.safeMode ? "Ativo, sem Direct real" : "Desativado";
-      messagePreview.textContent = hasMessage ? item.message : (item?.reason || "Nenhuma mensagem foi gerada.");
-      safeNote.textContent = data.safeMode || item?.safeMode
-        ? "Modo seguro ativo: nenhum Direct real foi enviado."
-        : "Modo seguro desativado.";
+      const user = item?.interaction?.username || document.getElementById("username").value.trim() || "@cliente";
+      const comment = item?.interaction?.comment || document.getElementById("comment").value.trim() || "--";
+      const product = item?.product?.name || "Nenhum produto encontrado";
+      const safe = data.safeMode || item?.safeMode ? "Ativo, sem Direct real" : "Desativado";
+      const message = item?.message || item?.reason || "Nenhuma mensagem foi gerada.";
+
+      summary.innerHTML = `
+        <h2>${escapeHtml(title)}</h2>
+        <div class="summary-grid">
+          <div class="summary-item"><small>Status</small><strong>${data.received ? "Evento recebido pelo backend" : "Evento não confirmado"}</strong></div>
+          <div class="summary-item"><small>Cliente</small><strong>${escapeHtml(user)}</strong></div>
+          <div class="summary-item"><small>Comentário</small><strong>${escapeHtml(comment)}</strong></div>
+          <div class="summary-item"><small>Produto</small><strong>${escapeHtml(product)}</strong></div>
+          <div class="summary-item"><small>Modo seguro</small><strong>${escapeHtml(safe)}</strong></div>
+        </div>
+        <div class="message-box-title">Mensagem gerada</div>
+        <div class="message-box">${escapeHtml(message)}</div>
+        <div class="safe-note">Modo seguro ativo: nenhum Direct real foi enviado.</div>
+      `;
     }
 
     async function clearHistory() {
@@ -357,14 +353,17 @@
         const data = await response.json();
         result.textContent = JSON.stringify(data, null, 2);
         summary.classList.add("visible");
-        summaryTitle.textContent = "🧹 Histórico limpo";
-        sumStatus.textContent = "Interações apagadas";
-        sumUser.textContent = "Duplicados liberados";
-        sumComment.textContent = "--";
-        sumProduct.textContent = "Contadores zerados";
-        sumSafe.textContent = "Sem envio real";
-        messagePreview.textContent = "Agora você pode testar novamente com o mesmo usuário sem bloquear por duplicado.";
-        safeNote.textContent = "Limpeza feita somente no histórico de interações.";
+        summary.innerHTML = `
+          <h2>🧹 Histórico limpo</h2>
+          <div class="summary-grid">
+            <div class="summary-item"><small>Status</small><strong>Interações apagadas</strong></div>
+            <div class="summary-item"><small>Duplicados</small><strong>Liberados para novo teste</strong></div>
+            <div class="summary-item"><small>Contadores</small><strong>Zerados</strong></div>
+          </div>
+          <div class="message-box-title">Mensagem</div>
+          <div class="message-box">Agora você pode testar novamente com o mesmo usuário sem bloquear por duplicado.</div>
+          <div class="safe-note">Limpeza feita somente no histórico de interações.</div>
+        `;
       } catch (error) {
         result.textContent = "Erro: " + error.message;
       } finally {
@@ -379,6 +378,7 @@
       button.disabled = true;
       loading.classList.add("visible");
       summary.classList.remove("visible");
+      summary.innerHTML = "";
       result.textContent = "Enviando evento fake da Meta...";
 
       try {

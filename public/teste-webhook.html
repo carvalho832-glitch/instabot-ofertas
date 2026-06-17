@@ -21,11 +21,11 @@
         radial-gradient(circle at top left, rgba(255, 49, 144, .22), transparent 35%),
         radial-gradient(circle at top right, rgba(86, 117, 255, .20), transparent 35%),
         #100b17;
-      padding: 22px;
+      padding: 18px;
     }
 
     main {
-      width: min(720px, 100%);
+      width: min(760px, 100%);
       margin: 0 auto;
     }
 
@@ -69,7 +69,7 @@
       outline: none;
     }
 
-    button {
+    button, .button-link {
       width: 100%;
       border: 0;
       border-radius: 999px;
@@ -80,30 +80,109 @@
       color: #fff;
       background: linear-gradient(90deg, #ff2e92, #ff7a59);
       cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      display: block;
     }
 
-    button:disabled {
-      opacity: .55;
-      cursor: not-allowed;
+    button:disabled { opacity: .55; cursor: not-allowed; }
+
+    .summary {
+      display: none;
+      margin-top: 18px;
+      border-radius: 22px;
+      padding: 18px;
+      background: rgba(0,0,0,.32);
+      border: 1px solid rgba(157,255,195,.2);
+    }
+
+    .summary.visible { display: block; }
+
+    .summary h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+    }
+
+    .summary-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .summary-item {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.09);
+      border-radius: 16px;
+      padding: 13px;
+    }
+
+    .summary-item small {
+      display: block;
+      color: #bfb9cb;
+      margin-bottom: 5px;
+      font-weight: 800;
+    }
+
+    .summary-item strong {
+      display: block;
+      color: #9dffc3;
+      font-size: 17px;
+      line-height: 1.35;
+    }
+
+    .message-preview {
+      margin-top: 12px;
+      padding: 15px;
+      border-radius: 18px;
+      background: #1e1c31;
+      color: #fff;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      max-height: 280px;
+      overflow: auto;
+    }
+
+    details {
+      margin-top: 16px;
+      background: rgba(0,0,0,.26);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 18px;
+      overflow: hidden;
+    }
+
+    summary {
+      padding: 15px;
+      cursor: pointer;
+      font-weight: 900;
+      color: #a8d8ff;
     }
 
     .result {
-      margin-top: 18px;
+      margin: 0;
       background: rgba(0,0,0,.35);
-      border: 1px solid rgba(255,255,255,.12);
-      border-radius: 18px;
+      border-top: 1px solid rgba(255,255,255,.10);
       padding: 16px;
       min-height: 130px;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       color: #d9fff0;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 13px;
+      font-size: 12px;
       line-height: 1.5;
+      max-height: 420px;
+      overflow: auto;
     }
 
-    .ok { color: #9dffc3; }
-    .warn { color: #ffe09d; }
+    .loading-box {
+      margin-top: 16px;
+      padding: 15px;
+      border-radius: 18px;
+      background: rgba(255,224,157,.12);
+      color: #ffe09d;
+      display: none;
+      font-weight: 800;
+    }
+
+    .loading-box.visible { display: block; }
     .links { margin-top: 18px; display: grid; gap: 10px; }
     a { color: #a8d8ff; text-decoration: none; font-weight: 800; }
   </style>
@@ -128,7 +207,25 @@
 
       <button id="sendTest">Enviar teste para /api/testar-webhook-meta</button>
 
-      <div id="result" class="result">Aguardando teste...</div>
+      <div id="loading" class="loading-box">Enviando evento fake da Meta...</div>
+
+      <div id="summary" class="summary">
+        <h2 id="summaryTitle">✅ Webhook recebido</h2>
+        <div class="summary-grid">
+          <div class="summary-item"><small>Status</small><strong id="sumStatus">--</strong></div>
+          <div class="summary-item"><small>Cliente</small><strong id="sumUser">--</strong></div>
+          <div class="summary-item"><small>Comentário</small><strong id="sumComment">--</strong></div>
+          <div class="summary-item"><small>Produto</small><strong id="sumProduct">--</strong></div>
+          <div class="summary-item"><small>Modo seguro</small><strong id="sumSafe">--</strong></div>
+        </div>
+
+        <div class="message-preview" id="messagePreview">Mensagem gerada aparecerá aqui.</div>
+      </div>
+
+      <details id="technicalDetails">
+        <summary>Ver detalhes técnicos JSON</summary>
+        <pre id="result" class="result">Aguardando teste...</pre>
+      </details>
 
       <div class="links">
         <a href="/">← Voltar para o painel</a>
@@ -141,9 +238,50 @@
   <script>
     const button = document.getElementById("sendTest");
     const result = document.getElementById("result");
+    const loading = document.getElementById("loading");
+    const summary = document.getElementById("summary");
+    const summaryTitle = document.getElementById("summaryTitle");
+    const sumStatus = document.getElementById("sumStatus");
+    const sumUser = document.getElementById("sumUser");
+    const sumComment = document.getElementById("sumComment");
+    const sumProduct = document.getElementById("sumProduct");
+    const sumSafe = document.getElementById("sumSafe");
+    const messagePreview = document.getElementById("messagePreview");
+    const technicalDetails = document.getElementById("technicalDetails");
+
+    function firstResult(data) {
+      return data && Array.isArray(data.results) && data.results.length ? data.results[0] : null;
+    }
+
+    function renderSummary(data) {
+      const item = firstResult(data);
+      summary.classList.add("visible");
+      technicalDetails.open = false;
+
+      if (!data || !data.ok) {
+        summaryTitle.textContent = "⚠️ Webhook recebido com alerta";
+        sumStatus.textContent = data && data.error ? data.error : "Erro ao processar";
+        sumUser.textContent = "--";
+        sumComment.textContent = "--";
+        sumProduct.textContent = "--";
+        sumSafe.textContent = "--";
+        messagePreview.textContent = "Confira os detalhes técnicos no JSON.";
+        return;
+      }
+
+      summaryTitle.textContent = item && item.matched ? "✅ Webhook recebido e produto encontrado" : "⚠️ Webhook recebido, sem produto encontrado";
+      sumStatus.textContent = data.received ? "Evento recebido pelo backend" : "Evento não confirmado";
+      sumUser.textContent = item?.interaction?.username || document.getElementById("username").value.trim() || "@cliente";
+      sumComment.textContent = item?.interaction?.comment || document.getElementById("comment").value.trim() || "--";
+      sumProduct.textContent = item?.product?.name || "Nenhum produto encontrado";
+      sumSafe.textContent = data.safeMode || item?.safeMode ? "Ativo, sem Direct real" : "Desativado";
+      messagePreview.textContent = item?.message || item?.reason || "Nenhuma mensagem foi gerada.";
+    }
 
     button.addEventListener("click", async () => {
       button.disabled = true;
+      loading.classList.add("visible");
+      summary.classList.remove("visible");
       result.textContent = "Enviando evento fake da Meta...";
 
       try {
@@ -159,9 +297,13 @@
 
         const data = await response.json();
         result.textContent = JSON.stringify(data, null, 2);
+        renderSummary(data);
       } catch (error) {
-        result.textContent = "Erro: " + error.message;
+        const errorData = { ok: false, error: error.message };
+        result.textContent = JSON.stringify(errorData, null, 2);
+        renderSummary(errorData);
       } finally {
+        loading.classList.remove("visible");
         button.disabled = false;
       }
     });

@@ -19,6 +19,24 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
+const defaultTemplate = `Oi, {{nome}} 😍
+
+Vi seu comentário e separei o produto pra você:
+
+🔥 {{produto}}
+💰 De {{preco_antigo}}
+✅ Por {{preco_atual}}
+
+{{cupom}}
+{{frete}}
+{{validade}}
+{{beneficio}}
+
+🛒 Comprar com desconto:
+{{link}}
+
+Qualquer dúvida, me chama aqui 💬`;
+
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -32,6 +50,26 @@ function ensureSupabase(req, res, next) {
   }
 
   next();
+}
+
+function normalizeText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function commentHasKeyword(comment, keywordList = []) {
+  const normalizedComment = normalizeText(comment);
+  return keywordList.some((keyword) => normalizedComment.includes(normalizeText(keyword)));
+}
+
+function extractName(username = "") {
+  const clean = String(username).replace("@", "").trim();
+  if (!clean) return "tudo bem";
+  const firstPart = clean.split(".")[0].split("_")[0];
+  return firstPart.charAt(0).toUpperCase() + firstPart.slice(1);
 }
 
 function toDbProduct(product = {}) {
@@ -80,6 +118,29 @@ function fromDbProduct(row = {}) {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+function buildDirectMessage(product, username) {
+  const coupon = product.couponCode ? `🎟️ Cupom: ${product.couponCode}` : "";
+  const shipping = product.freeShipping ? "🚚 Frete grátis disponível" : "";
+  const validity = product.offerValidity ? `⏰ ${product.offerValidity}` : "";
+  const benefit = product.benefitText ? `✨ ${product.benefitText}` : "";
+
+  return String(product.template || defaultTemplate)
+    .replaceAll("{{nome}}", extractName(username))
+    .replaceAll("{{usuario}}", username)
+    .replaceAll("{{produto}}", product.name || "")
+    .replaceAll("{{plataforma}}", product.platform || "")
+    .replaceAll("{{categoria}}", product.category || "")
+    .replaceAll("{{preco_antigo}}", product.oldPrice || "")
+    .replaceAll("{{preco_atual}}", product.newPrice || "")
+    .replaceAll("{{cupom}}", coupon)
+    .replaceAll("{{frete}}", shipping)
+    .replaceAll("{{validade}}", validity)
+    .replaceAll("{{beneficio}}", benefit)
+    .replaceAll("{{link}}", product.link || "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function toDbInteraction(interaction = {}) {
@@ -140,6 +201,29 @@ function fromDbConfig(row = {}) {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+async function getBotConfig() {
+  const { data } = await supabase
+    .from("configuracoes")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  return data?.[0]
+    ? fromDbConfig(data[0])
+    : { publicReply: true, blockDuplicate: true, botMode: "simulation" };
+}
+
+async function insertInteraction(interaction) {
+  const { data, error } = await supabase
+    .from("interacoes")
+    .insert(toDbInteraction(interaction))
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return fromDbInteraction(data);
 }
 
 app.get("/health", (req, res) => {
@@ -282,6 +366,122 @@ app.post("/api/configuracoes", ensureSupabase, async (req, res) => {
 
   if (error) return res.status(500).json({ ok: false, error: error.message });
   res.json(fromDbConfig(data));
+});
+
+app.post("/api/simular-comentario", ensureSupabase, async (req, res) => {
+  try {
+    const postId = String(req.body.postId || "").trim();
+    const username = String(req.body.username || "").trim();
+    const comment = String(req.body.comment || "").trim();
+
+    if (!postId || !username || !comment) {
+      return res.status(400).json({ ok: false, message: "Informe postId, username e comment." });
+    }
+
+    const config = await getBotConfig();
+
+    const { data: rows, error: productError } = await supabase
+      .from("produtos")
+      .select("*")
+      .eq("ativo", true)
+      .eq("instagram_media_id", postId);
+
+    if (productError) throw productError;
+
+    const matchedRow = (rows || []).find((row) => commentHasKeyword(comment, row.palavras_chave || []));
+
+    if (!matchedRow) {
+      const interaction = await insertInteraction({
+        username,
+        postId,
+        comment,
+        directSent: false,
+        reason: "Nenhum produto encontrado"
+      });
+
+      return res.json({
+        ok: true,
+        matched: false,
+        duplicate: false,
+        message: null,
+        product: null,
+        interaction,
+        publicReply: false,
+        reason: "Nenhum produto ativo encontrou esse ID + palavra-chave."
+      });
+    }
+
+    const product = fromDbProduct(matchedRow);
+
+    if (config.blockDuplicate) {
+      const { data: duplicateRows, error: duplicateError } = await supabase
+        .from("interacoes")
+        .select("id")
+        .eq("produto_id", product.id)
+        .eq("instagram_username", username)
+        .eq("direct_enviado", true)
+        .limit(1);
+
+      if (duplicateError) throw duplicateError;
+
+      if (duplicateRows?.length) {
+        const interaction = await insertInteraction({
+          productId: product.id,
+          username,
+          postId,
+          comment,
+          directSent: false,
+          reason: "Direct duplicado bloqueado"
+        });
+
+        return res.json({
+          ok: true,
+          matched: true,
+          duplicate: true,
+          message: null,
+          product,
+          interaction,
+          publicReply: false,
+          reason: "Direct duplicado bloqueado"
+        });
+      }
+    }
+
+    const message = buildDirectMessage(product, username);
+
+    const interaction = await insertInteraction({
+      productId: product.id,
+      username,
+      postId,
+      comment,
+      directSent: true,
+      reason: "Mensagem enviada pelo motor backend"
+    });
+
+    const nextDirects = Number(product.directs || 0) + 1;
+    const { data: updatedProductRow, error: updateError } = await supabase
+      .from("produtos")
+      .update({ directs_enviados: nextDirects, updated_at: new Date().toISOString() })
+      .eq("id", product.id)
+      .select("*")
+      .single();
+
+    if (updateError) throw updateError;
+
+    return res.json({
+      ok: true,
+      matched: true,
+      duplicate: false,
+      message,
+      product: fromDbProduct(updatedProductRow),
+      interaction,
+      publicReply: Boolean(config.publicReply),
+      reason: "Mensagem gerada pelo motor backend"
+    });
+  } catch (error) {
+    console.error("Erro na simulação backend:", error);
+    return res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
 app.get("/webhook", (req, res) => {

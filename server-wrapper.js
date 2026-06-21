@@ -2,6 +2,7 @@
 // Ajusta automaticamente chamadas da API da Meta para tokens da API do Instagram.
 // Tokens IGAA normalmente usam graph.instagram.com.
 // Resposta privada para comentário do Instagram usa /{ig-user-id}/messages com recipient.comment_id.
+// Respostas públicas ficam bloqueadas aqui para evitar loop do bot comentando no próprio post.
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
 
@@ -16,6 +17,13 @@ function getBodyParam(body, key) {
   }
 
   return "";
+}
+
+function fakeMetaOk(payload = {}) {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
+  });
 }
 
 function getInstagramAccountId() {
@@ -48,6 +56,12 @@ globalThis.fetch = async (input, init = {}) => {
   if (typeof input === "string" && input.startsWith("https://graph.facebook.com/")) {
     const accessToken = getBodyParam(init.body, "access_token").trim();
     const isInstagramToken = accessToken.startsWith("IGAA");
+    const publicReplyMatch = input.match(/^https:\/\/graph\.facebook\.com\/([^/]+)\/([^/]+)\/replies$/);
+
+    if (publicReplyMatch) {
+      console.log("Meta Graph: resposta publica bloqueada para evitar loop de comentarios.");
+      return fakeMetaOk({ id: `public_reply_blocked_${Date.now()}`, skipped: true });
+    }
 
     if (isInstagramToken) {
       const privateReplyMatch = input.match(/^https:\/\/graph\.facebook\.com\/([^/]+)\/([^/]+)\/private_replies$/);

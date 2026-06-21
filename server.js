@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 
+// Node 18+ já possui fetch global.
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,6 +15,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "instabot_verify_token";
 const BOT_MODE = process.env.BOT_MODE || "simulation";
+const GRAPH_VERSION = process.env.GRAPH_VERSION || "v25.0";
+const DIRECT_ENABLED = String(process.env.DIRECT_ENABLED ?? "true").toLowerCase() !== "false";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -39,6 +42,7 @@ Qualquer dúvida, me chama aqui 💬`;
 
 app.use(cors());
 app.use(express.json({ limit: "3mb" }));
+app.use(express.urlencoded({ extended: true, limit: "3mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 function ensureSupabase(req, res, next) {
@@ -234,6 +238,62 @@ async function getBotConfig() {
     : { publicReply: true, blockDuplicate: true, botMode: "simulation" };
 }
 
+function isConnectedMode(config = {}) {
+  const mode = normalizeText(config.botMode || config.modo_bot || BOT_MODE);
+  return ["connected", "conectado", "real", "producao", "production", "ativo"].includes(mode);
+}
+
+function getMetaAccessToken(config = {}) {
+  return (
+    process.env.META_ACCESS_TOKEN ||
+    process.env.INSTAGRAM_ACCESS_TOKEN ||
+    process.env.ACCESS_TOKEN ||
+    config.accessToken ||
+    config.access_token ||
+    ""
+  ).trim();
+}
+
+async function graphPost(edge, params = {}, accessToken) {
+  if (!accessToken) throw new Error("META_ACCESS_TOKEN ausente no Render.");
+
+  const url = `https://graph.facebook.com/${GRAPH_VERSION}/${edge.replace(/^\//, "")}`;
+  const body = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) body.append(key, String(value));
+  }
+
+  body.append("access_token", accessToken);
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || data.error) {
+    const message = data.error?.message || `Erro HTTP ${response.status} na API da Meta`;
+    const code = data.error?.code ? ` código ${data.error.code}` : "";
+    const subcode = data.error?.error_subcode ? ` subcódigo ${data.error.error_subcode}` : "";
+    throw new Error(`${message}${code}${subcode}`);
+  }
+
+  return data;
+}
+
+async function sendInstagramPrivateReply({ commentId, message, accessToken }) {
+  if (!commentId) throw new Error("ID do comentário ausente. Não dá para enviar resposta privada.");
+  return graphPost(`${commentId}/private_replies`, { message }, accessToken);
+}
+
+async function sendInstagramPublicReply({ commentId, message, accessToken }) {
+  if (!commentId) throw new Error("ID do comentário ausente. Não dá para responder comentário público.");
+  return graphPost(`${commentId}/replies`, { message }, accessToken);
+}
+
 async function insertInteraction(interaction) {
   const { data, error } = await supabase
     .from("interacoes")
@@ -257,7 +317,10 @@ async function insertWebhookEvent(event) {
     modo_seguro: event.safeMode !== false,
     payload: {
       ...(event.payload || {}),
-      produto_nome: event.productName || event.payload?.produto_nome || null
+      produto_nome: event.productName || event.payload?.produto_nome || null,
+      direct_status: event.directStatus || null,
+      public_reply_status: event.publicReplyStatus || null,
+      erro_meta: event.metaError || null
     }
   };
 
@@ -275,8 +338,12 @@ async function insertWebhookEvent(event) {
   return fromDbWebhookEvent(data);
 }
 
-async function runCommentEngine({ postId, username, comment, commentId = null, userId = null, source = "simulation", safeMode = true, rawPayload = {} }) {
+async function runCommentEngine({ postId, username, comment, commentId = null, userId = null, source = "simulation", rawPayload = {} }) {
   const config = await getBotConfig();
+  const accessToken = getMetaAccessToken(config);
+  const connectedMode = isConnectedMode(config);
+  const canSendRealDirect = source === "webhook" && connectedMode && DIRECT_ENABLED && Boolean(accessToken) && Boolean(commentId);
+  const safeMode = !canSendRealDirect;
 
   const { data: rows, error: productError } = await supabase
     .from("produtos")
@@ -379,6 +446,45 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
   }
 
   const message = buildDirectMessage(product, username);
+  let directSent = false;
+  let publicReplySent = false;
+  let directResult = null;
+  let publicReplyResult = null;
+  let metaError = null;
+  let reason = "Webhook processado em modo seguro, sem envio real.";
+  let eventType = "comment_safe_mode";
+
+  if (canSendRealDirect) {
+    try {
+      directResult = await sendInstagramPrivateReply({ commentId, message, accessToken });
+      directSent = true;
+      reason = "Direct enviado pela API da Meta";
+      eventType = "comment_direct_sent";
+
+      if (config.publicReply) {
+        try {
+          publicReplyResult = await sendInstagramPublicReply({
+            commentId,
+            message: `${username}, te mandei o link no Direct 🛒`,
+            accessToken
+          });
+          publicReplySent = true;
+        } catch (publicError) {
+          publicReplyResult = { ok: false, error: publicError.message };
+        }
+      }
+    } catch (error) {
+      metaError = error.message;
+      reason = `Erro ao enviar Direct pela Meta: ${error.message}`;
+      eventType = "comment_direct_error";
+    }
+  } else if (source === "webhook" && connectedMode && !accessToken) {
+    reason = "Modo conectado, mas META_ACCESS_TOKEN está ausente no Render.";
+    eventType = "comment_token_missing";
+  } else if (source === "webhook" && connectedMode && !commentId) {
+    reason = "Modo conectado, mas o webhook não trouxe ID do comentário.";
+    eventType = "comment_missing_comment_id";
+  }
 
   const interaction = await insertInteraction({
     productId: product.id,
@@ -387,23 +493,28 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
     commentId,
     postId,
     comment,
-    directSent: true,
-    reason: safeMode ? "Mensagem gerada em modo seguro" : "Mensagem enviada pelo motor backend"
+    directSent,
+    reason
   });
 
-  const nextDirects = Number(product.directs || 0) + 1;
-  const { data: updatedProductRow, error: updateError } = await supabase
-    .from("produtos")
-    .update({ directs_enviados: nextDirects, updated_at: new Date().toISOString() })
-    .eq("id", product.id)
-    .select("*")
-    .single();
+  let updatedProductRow = matchedRow;
 
-  if (updateError) throw updateError;
+  if (directSent) {
+    const nextDirects = Number(product.directs || 0) + 1;
+    const { data, error: updateError } = await supabase
+      .from("produtos")
+      .update({ directs_enviados: nextDirects, updated_at: new Date().toISOString() })
+      .eq("id", product.id)
+      .select("*")
+      .single();
+
+    if (updateError) throw updateError;
+    updatedProductRow = data;
+  }
 
   const event = await insertWebhookEvent({
     source,
-    eventType: safeMode ? "comment_safe_mode" : "comment_processed",
+    eventType,
     postId,
     commentId,
     username,
@@ -411,20 +522,32 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
     matched: true,
     productName: product.name,
     safeMode,
-    payload: rawPayload
+    directStatus: directSent ? "enviado" : "nao_enviado",
+    publicReplyStatus: publicReplySent ? "enviado" : config.publicReply ? "nao_enviado" : "desativado",
+    metaError,
+    payload: {
+      ...rawPayload,
+      meta_private_reply: directResult,
+      meta_public_reply: publicReplyResult,
+      connectedMode,
+      directEnabled: DIRECT_ENABLED,
+      hasAccessToken: Boolean(accessToken),
+      hasCommentId: Boolean(commentId)
+    }
   });
 
   return {
-    ok: true,
+    ok: !metaError,
     matched: true,
     duplicate: false,
     message,
     product: fromDbProduct(updatedProductRow),
     interaction,
     webhookEvent: event,
-    publicReply: Boolean(config.publicReply),
+    publicReply: publicReplySent,
     safeMode,
-    reason: safeMode ? "Webhook processado em modo seguro, sem envio real." : "Mensagem gerada pelo motor backend"
+    directSent,
+    reason
   };
 }
 
@@ -438,7 +561,7 @@ function extractInstagramComments(payload = {}) {
       const postId = value.media_id || value.media?.id || value.post_id || value.id || "";
       const username = value.from?.username || value.username || value.from?.name || "@cliente";
       const userId = value.from?.id || value.user_id || null;
-      const commentId = value.comment_id || value.id || null;
+      const commentId = value.comment_id || value.comment?.id || value.id || null;
 
       if (text && postId) {
         events.push({
@@ -461,8 +584,10 @@ app.get("/health", (req, res) => {
     ok: true,
     name: "instabot-ofertas",
     mode: BOT_MODE,
+    directEnabled: DIRECT_ENABLED,
     database: supabase ? "configured" : "missing",
     webhook: "ready",
+    graphVersion: GRAPH_VERSION,
     timestamp: new Date().toISOString()
   });
 });
@@ -471,6 +596,7 @@ app.get("/api/status", (req, res) => {
   res.json({
     app: "InstaBot Ofertas",
     mode: BOT_MODE,
+    directEnabled: DIRECT_ENABLED,
     database: supabase ? "configured" : "missing",
     webhook: "ready"
   });
@@ -652,7 +778,6 @@ app.post("/api/simular-comentario", ensureSupabase, async (req, res) => {
       username,
       comment,
       source: "simulation",
-      safeMode: false,
       rawPayload: { postId, username, comment }
     });
 
@@ -734,7 +859,6 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
         commentId: item.commentId,
         userId: item.userId,
         source: isInternalTest ? "webhook_test" : "webhook",
-        safeMode: true,
         rawPayload: req.body
       });
 
@@ -745,7 +869,6 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
       ok: true,
       received: true,
       comments: comments.length,
-      safeMode: true,
       results
     });
   } catch (error) {
@@ -756,10 +879,31 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
 
 app.post("/webhook", (req, res) => processWebhookPayload(req, res, false));
 
+function dataDeletionResponse(req) {
+  const code = `delete-${Date.now()}`;
+  const host = `${req.protocol}://${req.get("host")}`;
+  return {
+    url: `${host}/data-deletion-status?code=${encodeURIComponent(code)}`,
+    confirmation_code: code
+  };
+}
+
+app.post("/data-deletion", (req, res) => res.json(dataDeletionResponse(req)));
+app.post("/data-deletion-callback", (req, res) => res.json(dataDeletionResponse(req)));
+app.get("/data-deletion-status", (req, res) => {
+  res.json({
+    ok: true,
+    status: "received",
+    code: req.query.code || null,
+    message: "Solicitação de exclusão de dados recebida. Os dados relacionados serão removidos conforme a política do app."
+  });
+});
+
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 app.listen(PORT, () => {
   console.log(`InstaBot Ofertas rodando na porta ${PORT}`);
+  console.log(`Modo inicial: ${BOT_MODE} | Direct enabled: ${DIRECT_ENABLED} | Graph: ${GRAPH_VERSION}`);
 });

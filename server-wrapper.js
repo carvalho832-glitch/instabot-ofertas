@@ -1,9 +1,65 @@
 // Wrapper de inicialização do InstaBot Ofertas.
-// Ajusta automaticamente chamadas da API da Meta para tokens da API do Instagram.
-// Tokens IGAA normalmente usam graph.instagram.com.
-// Resposta privada para comentário do Instagram usa /{ig-user-id}/messages com recipient.comment_id.
+// Ajusta chamadas da API da Meta para tokens da API do Instagram.
+// Também pode inserir dados empresariais públicos na página inicial via variáveis de ambiente.
+
+import express from "express";
+import fs from "fs/promises";
+import path from "path";
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
+const nativeStatic = express.static.bind(express);
+
+function escapeHtml(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function buildBusinessFooter() {
+  const legalName = (process.env.BUSINESS_LEGAL_NAME || "").trim();
+  const tradeName = (process.env.BUSINESS_TRADE_NAME || "Mina de Ofertas").trim();
+  const businessSite = (process.env.BUSINESS_SITE || "https://instabot-ofertas.onrender.com").trim();
+
+  if (!legalName) return "";
+
+  return `
+<footer id="business-verification-footer" style="margin:30px auto;max-width:760px;padding:18px;border-radius:14px;background:#24182c;color:white;font-family:Arial,sans-serif;text-align:center;line-height:1.6;">
+  <strong>${escapeHtml(tradeName)}</strong><br>
+  Razão social: ${escapeHtml(legalName)}<br>
+  Nome comercial: ${escapeHtml(tradeName)}<br>
+  Site: ${escapeHtml(businessSite)}
+</footer>`;
+}
+
+express.static = function patchedExpressStatic(root, options) {
+  const staticMiddleware = nativeStatic(root, options);
+
+  return async function patchedStatic(req, res, next) {
+    const requestPath = String(req.path || req.url || "").split("?")[0];
+
+    if (req.method === "GET" && (requestPath === "/" || requestPath === "/index.html")) {
+      try {
+        const indexPath = path.join(root, "index.html");
+        let html = await fs.readFile(indexPath, "utf8");
+        const footer = buildBusinessFooter();
+
+        if (footer && !html.includes("business-verification-footer")) {
+          html = html.replace(/<\/body>/i, `${footer}\n</body>`);
+        }
+
+        res.type("html").send(html);
+        return;
+      } catch (error) {
+        console.warn("Business footer injection skipped:", error.message);
+      }
+    }
+
+    return staticMiddleware(req, res, next);
+  };
+};
 
 function getBodyParam(body, key) {
   if (!body) return "";

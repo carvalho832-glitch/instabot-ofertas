@@ -205,7 +205,7 @@ function buildDirectMessage(product, username) {
   const validity = product.offerValidity ? `⏰ ${product.offerValidity}` : "";
   const benefit = product.benefitText ? `✨ ${product.benefitText}` : "";
 
-  return String(product.template || defaultTemplate)
+  const rendered = String(product.template || defaultTemplate)
     .replaceAll("{{nome}}", extractName(username))
     .replaceAll("{{usuario}}", username)
     .replaceAll("{{produto}}", product.name || "")
@@ -220,6 +220,10 @@ function buildDirectMessage(product, username) {
     .replaceAll("{{link}}", product.link || "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  // All links are affiliate promotions, including products using a custom message.
+  return /(?:#publi|link de afiliado)/i.test(rendered)
+    ? rendered
+    : `${rendered}\n\n#publi • Link de afiliado da Mina de Ofertas. Confira preço, cor e características antes de comprar.`;
 }
 
 function toDbInteraction(interaction = {}) {

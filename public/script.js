@@ -240,8 +240,23 @@ function setupTabs() {
   });
 }
 
-// Kept only in memory, never in localStorage, URLs, logs, or database records.
+// Remember the admin key only in this browser's origin-scoped storage.
+// Never include it in URLs, logs, exported data, or product records.
+// Only use this option on a personal, trusted device.
+const ADMIN_KEY_STORAGE = "instabot_admin_key_v1";
 let adminSessionToken = "";
+try { adminSessionToken = localStorage.getItem(ADMIN_KEY_STORAGE) || ""; } catch (_) {}
+let adminPromptPending = null;
+
+function forgetAdminKey() {
+  adminSessionToken = "";
+  try { localStorage.removeItem(ADMIN_KEY_STORAGE); } catch (_) {}
+}
+
+function rememberAdminKey(key) {
+  adminSessionToken = key;
+  try { localStorage.setItem(ADMIN_KEY_STORAGE, key); } catch (_) {}
+}
 
 async function apiRequest(path, options = {}) {
   const fetchWithAdminToken = () => fetch(path, {
@@ -257,18 +272,27 @@ async function apiRequest(path, options = {}) {
   let response = await fetchWithAdminToken();
 
   if (response.status === 401) {
-    // Two initial API requests may run in parallel. Only prompt once.
     if (adminSessionToken === initiallyUsedToken) {
-      adminSessionToken = "";
-      const supplied = window.prompt("Digite a chave de administrador do InstaBot Ofertas:");
-      if (supplied) adminSessionToken = supplied.trim();
+      forgetAdminKey();
+      // Share one prompt between requests that start at the same time.
+      if (!adminPromptPending) {
+        adminPromptPending = Promise.resolve().then(() =>
+          window.prompt("Digite a chave de administrador do InstaBot Ofertas (será lembrada neste navegador):")
+        ).finally(() => { adminPromptPending = null; });
+      }
+      const supplied = await adminPromptPending;
+      if (supplied?.trim()) adminSessionToken = supplied.trim();
     }
-    if (adminSessionToken) response = await fetchWithAdminToken();
+    if (adminSessionToken) {
+      response = await fetchWithAdminToken();
+      if (response.ok) rememberAdminKey(adminSessionToken);
+      else if (response.status === 401) forgetAdminKey();
+    }
   }
 
-  const text = await response.text();
+  const responseText = await response.text();
   let data;
-  try { data = text ? JSON.parse(text) : null; }
+  try { data = responseText ? JSON.parse(responseText) : null; }
   catch { throw new Error("O servidor retornou uma resposta inválida."); }
 
   if (!response.ok) {

@@ -1243,6 +1243,23 @@ app.listen(PORT, () => {
     getAccessToken: getMetaAccessToken,
     sendNormalDM: sendInstagramNormalDM
   }).catch(error => console.warn("Owner inbound DM one-shot failure:", error?.name));
+  // One-time read-only reconciliation for the four published affiliate posts.
+  void (async () => {
+    try {
+      const token = getMetaAccessToken();
+      if (!token) return;
+      const targets = ["DeXpWzNn5sS", "DeXpR7SH_da", "DeXpOEuH3yn", "DeXpKENn8-T"];
+      let url = `https://graph.instagram.com/${GRAPH_VERSION}/me/media?fields=id,permalink&limit=100`;
+      for (let page = 0; page < 3 && url; page++) {
+        const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(12000) });
+        const json = await response.json();
+        if (!response.ok) { console.warn("Media reconciliation error", response.status, json.error?.code); return; }
+        const matched = (json.data || []).filter(row => targets.some(code => (row.permalink || "").includes(code)));
+        for (const row of matched) console.info("Media reconciliation match", JSON.stringify({ id: row.id, permalink: row.permalink }));
+        url = json.paging?.next || null;
+      }
+    } catch (error) { console.warn("Media reconciliation unavailable", error?.name); }
+  })();
   void inspectMetaSubscriptions();
   void requestMetaCommentSubscription();
   void runApprovedFollowerOneShot({ supabase, getAccessToken: getMetaAccessToken, sendPrivateReply: sendInstagramPrivateReply })

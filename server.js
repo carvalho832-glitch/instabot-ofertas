@@ -1,5 +1,5 @@
 import express from "express";
-import cors from "cors";
+import crypto from "node:crypto";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -16,7 +16,9 @@ const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "instabot_verify_token";
 const BOT_MODE = process.env.BOT_MODE || "simulation";
 const GRAPH_VERSION = process.env.GRAPH_VERSION || "v25.0";
-const DIRECT_ENABLED = String(process.env.DIRECT_ENABLED ?? "true").toLowerCase() !== "false";
+const DIRECT_ENABLED = String(process.env.DIRECT_ENABLED ?? "false").toLowerCase() === "true";
+const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN || "";
+const META_APP_SECRET = process.env.META_APP_SECRET || "";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -60,9 +62,33 @@ Vi seu comentário e separei o produto pra você:
 
 Qualquer dúvida, me chama aqui 💬`;
 
-app.use(cors());
-app.use(express.json({ limit: "3mb" }));
+app.use(express.json({
+  limit: "3mb",
+  verify(req, res, buffer) {
+    req.rawBody = Buffer.from(buffer);
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: "3mb" }));
+
+// All private dashboard API endpoints require the owner's secret token.
+// Fail closed if the token was not configured in the hosting environment.
+function constantTimeMatches(value, expected) {
+  const a = Buffer.from(String(value || ""), "utf8");
+  const b = Buffer.from(String(expected || ""), "utf8");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+app.use("/api", (req, res, next) => {
+  if (req.path === "/status" && req.method === "GET") return next();
+  if (!ADMIN_API_TOKEN) {
+    return res.status(503).json({ ok: false, message: "Acesso administrativo ainda não configurado." });
+  }
+  if (!constantTimeMatches(req.get("X-InstaBot-Admin"), ADMIN_API_TOKEN)) {
+    return res.status(401).json({ ok: false, message: "Autenticação administrativa necessária." });
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 
 function ensureSupabase(req, res, next) {
@@ -259,8 +285,11 @@ async function getBotConfig() {
 }
 
 function isConnectedMode(config = {}) {
-  const mode = normalizeText(config.botMode || config.modo_bot || BOT_MODE);
-  return ["connected", "conectado", "real", "producao", "production", "ativo"].includes(mode);
+  const modes = ["connected", "conectado", "real", "producao", "production", "ativo"];
+  // A persisted DB setting can never override the server's simulation kill switch.
+  const serverAllowsLive = modes.includes(normalizeText(BOT_MODE));
+  const accountAllowsLive = modes.includes(normalizeText(config.botMode || config.modo_bot));
+  return serverAllowsLive && accountAllowsLive;
 }
 
 function getMetaAccessToken(config = {}) {
@@ -606,7 +635,8 @@ app.get("/health", (req, res) => {
     mode: BOT_MODE,
     directEnabled: DIRECT_ENABLED,
     database: supabase ? "configured" : "missing",
-    webhook: "ready",
+    webhook: META_APP_SECRET ? "signed" : "disabled",
+    adminApi: ADMIN_API_TOKEN ? "protected" : "disabled",
     graphVersion: GRAPH_VERSION,
     timestamp: new Date().toISOString()
   });
@@ -618,7 +648,8 @@ app.get("/api/status", (req, res) => {
     mode: BOT_MODE,
     directEnabled: DIRECT_ENABLED,
     database: supabase ? "configured" : "missing",
-    webhook: "ready"
+    webhook: META_APP_SECRET ? "signed" : "disabled",
+    adminApi: ADMIN_API_TOKEN ? "protected" : "disabled"
   });
 });
 
@@ -897,7 +928,23 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
   }
 }
 
-app.post("/webhook", (req, res) => processWebhookPayload(req, res, false));
+function verifyMetaSignature(req, res, next) {
+  // Meta signs the raw, unmodified JSON body with X-Hub-Signature-256.
+  // Reject unsigned requests even when the bot is in simulation mode.
+  if (!META_APP_SECRET) {
+    return res.status(503).json({ ok: false, message: "Webhook temporariamente indisponível." });
+  }
+  const signature = req.get("X-Hub-Signature-256") || "";
+  const expected = "sha256=" + crypto.createHmac("sha256", META_APP_SECRET)
+    .update(req.rawBody || Buffer.alloc(0))
+    .digest("hex");
+  if (!/^sha256=[0-9a-f]{64}$/i.test(signature) || !constantTimeMatches(signature.toLowerCase(), expected)) {
+    return res.sendStatus(403);
+  }
+  return next();
+}
+
+app.post("/webhook", verifyMetaSignature, (req, res) => processWebhookPayload(req, res, false));
 
 function dataDeletionResponse(req) {
   const code = `delete-${Date.now()}`;

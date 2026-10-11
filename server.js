@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 import { createReviewRouter } from "./review-routes.js";
+import { runApprovedFollowerOneShot } from "./one-shot-follower.js";
 
 // Node 18+ já possui fetch global.
 dotenv.config();
@@ -1154,4 +1155,6 @@ app.listen(PORT, () => {
   console.log(`Modo inicial: ${BOT_MODE} | Direct enabled: ${DIRECT_ENABLED} | Graph: ${GRAPH_VERSION}`);
   void inspectMetaSubscriptions();
   void requestMetaCommentSubscription();
+  void runApprovedFollowerOneShot({ supabase, getAccessToken: getMetaAccessToken, sendPrivateReply: sendInstagramPrivateReply })
+    .catch(error => console.warn("Single follower diagnostic error:", error?.name));
 });

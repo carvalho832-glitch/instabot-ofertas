@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>InstaBot Ofertas | Painel de demonstração</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:#18253a;background:#f5f8fc}
+*{box-sizing:border-box}body{margin:0}main{max-width:1160px;margin:0 auto;padding:32px 22px 55px}
+header{background:#12263f;color:white;padding:25px 32px}header .wrap{max-width:1100px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap}
+h1{font-size:25px;margin:0 0 7px}.subtitle{color:#aac1d5;margin:0}.pill{background:#184c4f;color:#bbf6d5;border:1px solid #2c7776;border-radius:99px;padding:9px 14px;font-weight:700;font-size:13px}
+.kicker{letter-spacing:.1em;text-transform:uppercase;font-size:12px;font-weight:800;color:#697990;margin-bottom:9px}
+h2{font-size:20px;margin:0 0 12px}.desc{line-height:1.65;color:#586c83;margin:0 0 20px}
+.dashboard{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:25px 0}
+.card,.metric{background:white;border:1px solid #dfe8f3;border-radius:15px;box-shadow:0 5px 18px #12263f09;padding:22px}
+.metric small{display:block;font-size:13px;color:#62748a}.metric strong{display:block;font-size:35px;margin:5px 0 0;color:#0c6575}
+.grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}
+label{display:block;font-size:12px;font-weight:800;letter-spacing:.05em;color:#78899d;text-transform:uppercase;margin-bottom:6px}
+.value{font-weight:700;font-size:15px;overflow-wrap:anywhere;margin-bottom:16px}
+.link{color:#116dbe;text-decoration:none;font-weight:700;overflow-wrap:anywhere}
+.green{color:#147d52}.tag{display:inline-block;background:#e8f7f1;color:#166343;padding:6px 12px;border-radius:99px;font-size:12px;font-weight:800}
+.flow{display:grid;grid-template-columns:1fr 25px 1fr 25px 1fr;gap:10px;align-items:center}.step{border:1px solid #dce7f3;background:#f8fbff;border-radius:11px;padding:16px;text-align:center;font-weight:700;min-height:75px;display:flex;align-items:center;justify-content:center}
+.arrow{text-align:center;color:#5479a9;font-size:24px}
+.note{padding:13px 17px;border-radius:10px;background:#eef5ff;color:#43617e;font-size:13px;line-height:1.5}
+footer{color:#8190a1;font-size:12px;margin-top:20px;text-align:center}
+@media(max-width:740px){.dashboard,.grid{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}main{padding:20px 13px}}
+</style>
+</head>
+<body>
+<header><div class="wrap"><div><h1>🤖 InstaBot Ofertas</h1><p class="subtitle">Mina de Ofertas • Painel de demonstração</p></div><div class="pill">👁️ Visualização sem edição</div></div></header>
+<main>
+<div class="kicker">Integração com Instagram • Meta App Review</div>
+<h2>Automação de comentários para respostas privadas</h2>
+<p class="desc">Esta visualização apresenta dados reais e limitados do teste do Instagram, sem expor tokens, credenciais ou informações pessoais. A edição e as operações administrativas continuam protegidas.</p>
+<section class="dashboard">
+<div class="metric"><small>Publicação vinculada</small><strong id="totalProduct">...</strong></div>
+<div class="metric"><small>Interações processadas*</small><strong id="totalComments">...</strong></div>
+<div class="metric"><small>Directs confirmados*</small><strong id="totalDirects">...</strong></div>
+</section>
+<div class="grid">
+<section class="card">
+<div class="kicker">01 / Cadastro de produto</div><h2>Produto vinculado ao post</h2>
+<label>Produto</label><div class="value" id="productName">Carregando...</div>
+<label>Plataforma</label><div class="value" id="platform">...</div>
+<label>Preço consultado</label><div class="value" id="price">...</div>
+<label>ID da publicação do Instagram</label><div class="value" id="mediaId">...</div>
+<label>Palavra-chave configurada</label><div class="value" id="keywords">...</div>
+<label>Link de afiliado</label><div class="value"><a class="link" id="affiliateLink" href="#" target="_blank" rel="noopener noreferrer">...</a></div>
+<span class="tag" id="productStatus">Aguardando dados</span>
+</section>
+<section class="card">
+<div class="kicker">02 / Fluxo automatizado</div><h2>Do comentário ao Direct</h2>
+<p class="desc">Quando alguém comenta a palavra-chave na publicação cadastrada, o webhook da Meta notifica o servidor e o sistema encontra o produto correspondente.</p>
+<div class="flow"><div class="step">💬 Comentário<br>EU QUERO</div><div class="arrow">➜</div><div class="step">🤖 Reconhece<br>o produto</div><div class="arrow">➜</div><div class="step">📩 Direct<br>com link</div></div>
+<p class="desc" style="margin-top:24px">A resposta privada é enviada usando a API oficial do Instagram. O teste real de entrega é mostrado na gravação do celular.</p>
+<div class="note">🔒 O painel de demonstração é somente leitura. Produtos, configurações, tokens, webhooks e envios não podem ser alterados aqui.</div>
+</section>
+</div>
+<footer>* Totais de interações de teste dessa publicação, não métricas gerais da conta. Atualizado a cada carregamento da página.</footer>
+</main>
+<script>
+(async function(){
+  try{
+    const response=await fetch('/review/overview',{cache:'no-store'});
+    if(!response.ok)throw new Error('Dados indisponíveis');
+    const data=await response.json(),p=data.product||{};
+    const set=(id,value)=>{document.getElementById(id).textContent=String(value??'Não disponível')};
+    set('totalProduct',p.active?'01':'00');
+    set('totalComments',data.statistics?.commentsProcessed??0);
+    set('totalDirects',data.statistics?.directRepliesConfirmed??0);
+    set('productName',p.name);set('platform',p.platform);set('price',p.newPrice);
+    set('mediaId',p.instagramMediaId);
+    set('keywords',(p.keywords||[]).join(', '));
+    const link=document.getElementById('affiliateLink');
+    if(/^https:\/\/(s\.shopee\.com\.br|shopee\.com\.br)\//i.test(p.affiliateLink||'')){link.href=p.affiliateLink;link.textContent=p.affiliateLink}
+    else{link.removeAttribute('href');link.textContent='Não disponível'}
+    set('productStatus',p.active?'Produto ativo e vinculado':'Produto não localizado');
+  }catch(e){document.getElementById('productName').textContent='Não foi possível carregar a demonstração';}
+})();
+</script>
+</body>
+</html>

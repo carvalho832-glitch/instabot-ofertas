@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
+import { createReviewRouter } from "./review-routes.js";
 
 // Node 18+ já possui fetch global.
 dotenv.config();
@@ -113,6 +114,8 @@ app.use("/api", (req, res, next) => {
   next();
 });
 
+app.get("/", (req, res) => res.redirect(302, "/revisao-meta.html"));
+app.use("/review", createReviewRouter({ supabase, mediaId: process.env.META_TEST_MEDIA_ID, mode: BOT_MODE, directEnabled: DIRECT_ENABLED }));
 app.use(express.static(path.join(__dirname, "public")));
 
 function ensureSupabase(req, res, next) {

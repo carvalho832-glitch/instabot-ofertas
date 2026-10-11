@@ -990,7 +990,48 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+async function inspectMetaSubscriptions() {
+  if (process.env.META_DIAG_ON_BOOT !== "true") return;
+  const token = getMetaAccessToken();
+  const accountId = (process.env.INSTAGRAM_ACCOUNT_ID || process.env.INSTAGRAM_BUSINESS_ID || process.env.IG_USER_ID || "").trim();
+  if (!token) {
+    console.info("Meta read-only diagnostic:", JSON.stringify({ stage: "token_missing" }));
+    return;
+  }
+  const check = async (relativePath) => {
+    try {
+      const response = await fetch(`https://graph.instagram.com/${GRAPH_VERSION}/${relativePath}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(12000)
+      });
+      const json = await response.json().catch(() => ({}));
+      const rows = Array.isArray(json.data) ? json.data : [];
+      const fields = [...new Set(rows.flatMap((item) => item.subscribed_fields || []))];
+      return {
+        httpStatus: response.status,
+        graphErrorCode: Number(json.error?.code || 0) || null,
+        subscriptionCount: rows.length,
+        subscribedFields: fields.slice(0, 25),
+        hasCommentsSubscription: fields.includes("comments"),
+        accountMatchesConfigured: relativePath.startsWith("me?") && accountId && json.id
+          ? String(json.id) === accountId : undefined
+      };
+    } catch (error) {
+      return { stage: "request_failed", errorCode: error?.cause?.code || error?.name || "unknown" };
+    }
+  };
+  const [account, meSubscriptions, idSubscriptions] = await Promise.all([
+    check("me?fields=id"),
+    check("me/subscribed_apps"),
+    accountId ? check(`${encodeURIComponent(accountId)}/subscribed_apps`) : Promise.resolve({ stage: "account_id_missing" })
+  ]);
+  console.info("Meta read-only diagnostic:", JSON.stringify({
+    account, meSubscriptions, idSubscriptions
+  }));
+}
+
 app.listen(PORT, () => {
   console.log(`InstaBot Ofertas rodando na porta ${PORT}`);
   console.log(`Modo inicial: ${BOT_MODE} | Direct enabled: ${DIRECT_ENABLED} | Graph: ${GRAPH_VERSION}`);
+  void inspectMetaSubscriptions();
 });

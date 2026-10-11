@@ -240,17 +240,36 @@ function setupTabs() {
   });
 }
 
+// Kept only in memory, never in localStorage, URLs, logs, or database records.
+let adminSessionToken = "";
+
 async function apiRequest(path, options = {}) {
-  const response = await fetch(path, {
+  const fetchWithAdminToken = () => fetch(path, {
+    ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(options.headers || {})
-    },
-    ...options
+      ...(options.headers || {}),
+      ...(adminSessionToken ? { "X-InstaBot-Admin": adminSessionToken } : {})
+    }
   });
 
+  const initiallyUsedToken = adminSessionToken;
+  let response = await fetchWithAdminToken();
+
+  if (response.status === 401) {
+    // Two initial API requests may run in parallel. Only prompt once.
+    if (adminSessionToken === initiallyUsedToken) {
+      adminSessionToken = "";
+      const supplied = window.prompt("Digite a chave de administrador do InstaBot Ofertas:");
+      if (supplied) adminSessionToken = supplied.trim();
+    }
+    if (adminSessionToken) response = await fetchWithAdminToken();
+  }
+
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  let data;
+  try { data = text ? JSON.parse(text) : null; }
+  catch { throw new Error("O servidor retornou uma resposta inválida."); }
 
   if (!response.ok) {
     throw new Error(data?.message || data?.error || "Erro na API");
@@ -1044,7 +1063,8 @@ async function saveConfigToApi(config) {
 }
 
 function saveConfigToStorage() {
-  localStorage.setItem("instabot_config_v1_github", JSON.stringify(botConfig));
+  const { accessToken, verifyToken, ...safeConfig } = botConfig;
+  localStorage.setItem("instabot_config_v1_github", JSON.stringify(safeConfig));
 }
 
 async function resetBotConfig() {

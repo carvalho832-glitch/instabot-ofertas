@@ -564,7 +564,13 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
     // database records the send; the persisted duplicate query blocks later ones.
     if (approvedTest) META_REVIEW_ATTEMPTED_COMMENT_IDS.add(String(commentId));
     try {
-      directResult = await sendInstagramPrivateReply({ commentId, message, accessToken });
+      directResult = approvedProduction
+        ? await sendOwnerReplyOnce({
+            supabase, commentId, postId, username, comment, message, accessToken,
+            insertAuditEvent: insertWebhookEvent,
+            sendPrivateReply: sendInstagramPrivateReply
+          })
+        : await sendInstagramPrivateReply({ commentId, message, accessToken });
       directSent = true;
       reason = "Direct enviado pela API da Meta";
       eventType = "comment_direct_sent";
@@ -664,7 +670,10 @@ function extractInstagramComments(payload = {}) {
 
   for (const entry of payload.entry || []) {
     for (const change of entry.changes || []) {
+      // Only top-level comments on the authorized business account can trigger a Direct.
+      if (change.field && change.field !== "comments") continue;
       const value = change.value || {};
+      if (value.parent_id || value.parent_comment_id || value.is_reply === true) continue;
       const text = value.text || value.comment_text || value.message || "";
       const postId = value.media_id || value.media?.id || value.post_id || value.id || "";
       const username = value.from?.username || value.username || value.from?.name || "@cliente";

@@ -20,7 +20,27 @@ const DIRECT_ENABLED = String(process.env.DIRECT_ENABLED ?? "true").toLowerCase(
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
+// Log only non-sensitive network error codes. Never log URLs, keys or request headers.
+async function diagnosedSupabaseFetch(input, init) {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    const cause = error?.cause;
+    const nestedErrors = Array.isArray(cause?.errors) ? cause.errors : [];
+    const codes = [...new Set([cause?.code, ...nestedErrors.map((item) => item?.code)].filter(Boolean))];
+    console.error("Supabase network diagnostic:", JSON.stringify({
+      errorType: error?.name || "Error",
+      causeType: cause?.name || null,
+      networkCodes: codes.slice(0, 4),
+      syscall: cause?.syscall || null
+    }));
+    throw error;
+  }
+}
+const supabase = supabaseUrl && supabaseKey
+  ? createClient(supabaseUrl, supabaseKey, { global: { fetch: diagnosedSupabaseFetch } })
+  : null;
 
 const defaultTemplate = `Oi, {{nome}} 😍
 

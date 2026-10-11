@@ -635,7 +635,8 @@ app.get("/health", (req, res) => {
     mode: BOT_MODE,
     directEnabled: DIRECT_ENABLED,
     database: supabase ? "configured" : "missing",
-    webhook: "ready",
+    webhook: META_APP_SECRET ? "signed" : "disabled",
+    adminApi: ADMIN_API_TOKEN ? "protected" : "disabled",
     graphVersion: GRAPH_VERSION,
     timestamp: new Date().toISOString()
   });
@@ -647,7 +648,8 @@ app.get("/api/status", (req, res) => {
     mode: BOT_MODE,
     directEnabled: DIRECT_ENABLED,
     database: supabase ? "configured" : "missing",
-    webhook: "ready"
+    webhook: META_APP_SECRET ? "signed" : "disabled",
+    adminApi: ADMIN_API_TOKEN ? "protected" : "disabled"
   });
 });
 

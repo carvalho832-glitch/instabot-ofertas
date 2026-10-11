@@ -1030,8 +1030,69 @@ async function inspectMetaSubscriptions() {
   }));
 }
 
+async function requestMetaCommentSubscription() {
+  if (process.env.META_SUBSCRIBE_COMMENTS_ON_BOOT !== "true") return;
+  // Subscription changes are only permitted during a fully disabled send window.
+  if (BOT_MODE !== "simulation" || DIRECT_ENABLED) {
+    console.warn("Meta subscription: blocked because safe simulation mode is not enabled");
+    return;
+  }
+  const token = getMetaAccessToken();
+  const expectedUsername = normalizeText(process.env.META_ACCOUNT_USERNAME_EXPECTED || "");
+  if (!token || expectedUsername !== "minadeofertas_ofc") {
+    console.warn("Meta subscription: missing token or expected account confirmation");
+    return;
+  }
+  const headers = { Authorization: `Bearer ${token}` };
+  try {
+    const profileResponse = await fetch(`https://graph.instagram.com/${GRAPH_VERSION}/me?fields=id,username`, {
+      headers, signal: AbortSignal.timeout(12000)
+    });
+    const profile = await profileResponse.json().catch(() => ({}));
+    if (!profileResponse.ok || normalizeText(profile.username) !== expectedUsername) {
+      console.warn("Meta subscription: account identity check failed", JSON.stringify({
+        profileHttp: profileResponse.status, graphErrorCode: profile.error?.code || null,
+        accountUsernameMatched: normalizeText(profile.username) === expectedUsername
+      }));
+      return;
+    }
+    console.info("Meta subscription: target account confirmed", JSON.stringify({
+      username: profile.username, igAccountId: profile.id
+    }));
+    const changeResponse = await fetch(`https://graph.instagram.com/${GRAPH_VERSION}/me/subscribed_apps`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ subscribed_fields: "comments,messages" }),
+      signal: AbortSignal.timeout(12000)
+    });
+    const changed = await changeResponse.json().catch(() => ({}));
+    console.info("Meta subscription: update result", JSON.stringify({
+      httpStatus: changeResponse.status,
+      success: changed.success === true,
+      graphErrorCode: changed.error?.code || null,
+      graphErrorSubcode: changed.error?.error_subcode || null
+    }));
+    const checkResponse = await fetch(`https://graph.instagram.com/${GRAPH_VERSION}/me/subscribed_apps`, {
+      headers, signal: AbortSignal.timeout(12000)
+    });
+    const check = await checkResponse.json().catch(() => ({}));
+    const rows = Array.isArray(check.data) ? check.data : [];
+    const fields = [...new Set(rows.flatMap((row) => row.subscribed_fields || []))];
+    console.info("Meta subscription: verified fields", JSON.stringify({
+      httpStatus: checkResponse.status, fields,
+      commentsSubscribed: fields.includes("comments"),
+      messagesSubscribed: fields.includes("messages")
+    }));
+  } catch (error) {
+    console.warn("Meta subscription: request error", JSON.stringify({
+      errorCode: error?.cause?.code || error?.name || "unknown"
+    }));
+  }
+}
+
 app.listen(PORT, () => {
   console.log(`InstaBot Ofertas rodando na porta ${PORT}`);
   console.log(`Modo inicial: ${BOT_MODE} | Direct enabled: ${DIRECT_ENABLED} | Graph: ${GRAPH_VERSION}`);
   void inspectMetaSubscriptions();
+  void requestMetaCommentSubscription();
 });

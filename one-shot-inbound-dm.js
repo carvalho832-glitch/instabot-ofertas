@@ -6,7 +6,6 @@ export async function runOwnerInboundDmTest({ supabase, getAccessToken, sendNorm
   if (process.env.OWNER_INBOUND_DM_TEST_ARMED !== "true") return;
   const expectedSender = String(process.env.OWNER_INBOUND_DM_TEST_SENDER_ID || "").trim();
   const expectedHandle = String(process.env.OWNER_INBOUND_DM_TEST_USERNAME || "").trim().toLowerCase();
-  const accountId = String(process.env.INSTAGRAM_ACCOUNT_ID || "").trim();
   const expectedAccount = String(process.env.META_ACCOUNT_USERNAME_EXPECTED || "").trim().toLowerCase();
   if (!supabase || !/^\d{10,25}$/.test(expectedSender) ||
       expectedHandle !== "@codigodopmarcal" || expectedAccount !== "minadeofertas_ofc") {
@@ -34,9 +33,10 @@ export async function runOwnerInboundDmTest({ supabase, getAccessToken, sendNorm
     return;
   }
   // Match the same account via the signed comment's originating user ID.
+  const verifiedAccountId = String(ownerReplyResult.data[0].payload?.entry?.[0]?.id || "");
   const commentChange = ownerReplyResult.data[0].payload?.entry?.flatMap(x => x.changes || [])
     .find(x => x.value?.from?.id === expectedSender && x.value?.from?.username === expectedHandle.slice(1));
-  if (!commentChange) {
+  if (!commentChange || !/^\\d{10,25}$/.test(verifiedAccountId)) {
     console.warn("One-off DM test cancelled: commenter identity mismatch");
     return;
   }
@@ -46,7 +46,8 @@ export async function runOwnerInboundDmTest({ supabase, getAccessToken, sendNorm
     )
   ).find(m =>
     String(m.sender?.id || "") === expectedSender &&
-    String(m.recipient?.id || "") === String(accountId || "17841442779350383") &&
+    String(m.recipient?.id || "") === verifiedAccountId &&
+    m.entryId === verifiedAccountId &&
     String(m.message?.text || "").trim().toUpperCase() === "OI TESTE INSTABOT" &&
     Boolean(m.message?.mid) && !m.message?.is_echo &&
     now - Date.parse(m.recordedAt) <= 60 * 60 * 1000

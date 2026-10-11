@@ -783,6 +783,24 @@ app.get("/api/status", (req, res) => {
   });
 });
 
+// Read-only Instagram media reconciliation. Protected by the existing admin API guard.
+app.get("/api/instagram-media", async (req, res) => {
+  const token = getMetaAccessToken();
+  if (!token) return res.status(503).json({ ok: false, message: "Instagram token not configured" });
+  try {
+    const url = `https://graph.instagram.com/${GRAPH_VERSION}/me/media?fields=id,permalink,caption&limit=50`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15000)
+    });
+    const payload = await response.json();
+    if (!response.ok) return res.status(502).json({ ok: false, message: "Instagram media lookup failed", code: payload.error?.code || null });
+    return res.json({ ok: true, data: (payload.data || []).map(({ id, permalink }) => ({ id, permalink })) });
+  } catch (error) {
+    return res.status(502).json({ ok: false, message: "Instagram media lookup unavailable" });
+  }
+});
+
 app.get("/api/produtos", ensureSupabase, async (req, res) => {
   const { data, error } = await supabase
     .from("produtos")

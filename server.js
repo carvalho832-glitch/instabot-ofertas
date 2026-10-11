@@ -306,44 +306,53 @@ function getMetaAccessToken(config = {}) {
   ).trim();
 }
 
-async function graphPost(edge, params = {}, accessToken) {
-  if (!accessToken) throw new Error("META_ACCESS_TOKEN ausente no Render.");
-
-  const url = `https://graph.facebook.com/${GRAPH_VERSION}/${edge.replace(/^\//, "")}`;
-  const body = new URLSearchParams();
-
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null) body.append(key, String(value));
-  }
-
-  body.append("access_token", accessToken);
-
-  const response = await fetch(url, {
+// Instagram Login uses the graph.instagram.com host and Bearer authorization.
+async function instagramPost(edge, payload, accessToken) {
+  if (!accessToken) throw new Error("Instagram access token is not configured");
+  const response = await fetch(`https://graph.instagram.com/${GRAPH_VERSION}/${edge}`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15000)
   });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok || data.error) {
-    const message = data.error?.message || `Erro HTTP ${response.status} na API da Meta`;
-    const code = data.error?.code ? ` código ${data.error.code}` : "";
-    const subcode = data.error?.error_subcode ? ` subcódigo ${data.error.error_subcode}` : "";
-    throw new Error(`${message}${code}${subcode}`);
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.error) {
+    throw new Error(`Instagram API HTTP ${response.status} (code ${result.error?.code ?? "unknown"}; subcode ${result.error?.error_subcode ?? "none"})`);
   }
+  return result;
+}
 
-  return data;
+// Resolve the account from the *same token* instead of a potentially stale ID.
+async function authenticatedInstagramAccount(accessToken) {
+  const response = await fetch(`https://graph.instagram.com/${GRAPH_VERSION}/me?fields=id,username`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(12000)
+  });
+  const profile = await response.json().catch(() => ({}));
+  const expectedUsername = normalizeText(process.env.META_ACCOUNT_USERNAME_EXPECTED || "minadeofertas_ofc");
+  if (!response.ok || !profile.id || normalizeText(profile.username) !== expectedUsername) {
+    throw new Error(`Instagram account validation failed (HTTP ${response.status}; code ${profile.error?.code ?? "unknown"})`);
+  }
+  return String(profile.id);
 }
 
 async function sendInstagramPrivateReply({ commentId, message, accessToken }) {
-  if (!commentId) throw new Error("ID do comentário ausente. Não dá para enviar resposta privada.");
-  return graphPost(`${commentId}/private_replies`, { message }, accessToken);
+  if (!commentId) throw new Error("Instagram comment ID is missing");
+  const accountId = await authenticatedInstagramAccount(accessToken);
+  const result = await instagramPost(`${encodeURIComponent(accountId)}/messages`, {
+    recipient: { comment_id: String(commentId) },
+    message: { text: String(message) }
+  }, accessToken);
+  if (!result.message_id) throw new Error("Instagram accepted the request but returned no message ID");
+  return { recipient_id: result.recipient_id, message_id: result.message_id };
 }
 
 async function sendInstagramPublicReply({ commentId, message, accessToken }) {
-  if (!commentId) throw new Error("ID do comentário ausente. Não dá para responder comentário público.");
-  return graphPost(`${commentId}/replies`, { message }, accessToken);
+  if (!commentId) throw new Error("Instagram comment ID is missing");
+  return instagramPost(`${encodeURIComponent(String(commentId))}/replies`, { message: String(message) }, accessToken);
 }
 
 async function insertInteraction(interaction) {

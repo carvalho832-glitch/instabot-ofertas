@@ -649,7 +649,8 @@ app.get("/health", (req, res) => {
     mode: BOT_MODE,
     directEnabled: DIRECT_ENABLED,
     database: supabase ? "configured" : "missing",
-    webhook: META_APP_SECRET ? "signed" : "disabled",
+    webhook: META_APP_SECRET || INSTAGRAM_APP_SECRET ? "signed" : "disabled",
+    instagramWebhookSigningKeyPresent: Boolean(INSTAGRAM_APP_SECRET),
     adminApi: ADMIN_API_TOKEN ? "protected" : "disabled",
     graphVersion: GRAPH_VERSION,
     metaAccessTokenConfigured: Boolean(process.env.META_ACCESS_TOKEN || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.ACCESS_TOKEN),
@@ -665,7 +666,8 @@ app.get("/api/status", (req, res) => {
     mode: BOT_MODE,
     directEnabled: DIRECT_ENABLED,
     database: supabase ? "configured" : "missing",
-    webhook: META_APP_SECRET ? "signed" : "disabled",
+    webhook: META_APP_SECRET || INSTAGRAM_APP_SECRET ? "signed" : "disabled",
+    instagramWebhookSigningKeyPresent: Boolean(INSTAGRAM_APP_SECRET),
     adminApi: ADMIN_API_TOKEN ? "protected" : "disabled"
   });
 });

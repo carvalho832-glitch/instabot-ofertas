@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 import { createReviewRouter } from "./review-routes.js";
+import { runApprovedFollowerOneShot } from "./one-shot-follower.js";
 
 // Node 18+ já possui fetch global.
 dotenv.config();

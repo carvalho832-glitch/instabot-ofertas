@@ -23,6 +23,27 @@ const META_APP_SECRET = process.env.META_APP_SECRET || "";
 // the Meta parent app's secret. Store it ONLY in Render environment vars.
 const INSTAGRAM_APP_SECRET = process.env.INSTAGRAM_APP_SECRET || "";
 
+// Short-lived, single-audience Meta review demonstration guard.
+// The countdown starts when the Render process boots; a test cannot go live
+// without an exact phrase, profile, post, explicit replay flag, and TTL.
+const META_REVIEW_BOOT_AT_MS = Date.now();
+const META_REVIEW_ATTEMPTED_COMMENT_IDS = new Set();
+
+function isApprovedReviewComment({ postId, username, comment }) {
+  const ttlMinutes = Number(process.env.META_TEST_TTL_MINUTES || "0");
+  const expectedPhrase = normalizeText(process.env.META_TEST_COMMENT_TEXT || "");
+  const expectedUser = normalizeText(process.env.META_TEST_USERNAME || "").replace(/^@/, "");
+  const expectedMediaId = String(process.env.META_TEST_MEDIA_ID || "").trim();
+  return String(process.env.META_LIVE_AUDIENCE || "").trim().toLowerCase() === "test"
+    && process.env.META_TEST_ALLOW_ONE_REPLAY === "true"
+    && Number.isFinite(ttlMinutes) && ttlMinutes > 0 && ttlMinutes <= 30
+    && Date.now() < META_REVIEW_BOOT_AT_MS + ttlMinutes * 60000
+    && Boolean(expectedPhrase) && Boolean(expectedUser) && Boolean(expectedMediaId)
+    && normalizeText(username).replace(/^@/, "") === expectedUser
+    && String(postId) === expectedMediaId
+    && normalizeText(comment) === expectedPhrase;
+}
+
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
@@ -410,8 +431,7 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
   const testUsername = normalizeText(process.env.META_TEST_USERNAME || "").replace(/^@/, "");
   const testMediaId = String(process.env.META_TEST_MEDIA_ID || "").trim();
   const commenter = normalizeText(username).replace(/^@/, "");
-  const approvedTest = liveAudience === "test" && Boolean(testUsername) && Boolean(testMediaId)
-    && commenter === testUsername && postId === testMediaId;
+  const approvedTest = isApprovedReviewComment({ postId, username, comment });
   const approvedProduction = liveAudience === "all";
   const canSendRealDirect = source === "webhook" && connectedMode && DIRECT_ENABLED
     && Boolean(accessToken) && Boolean(commentId) && (approvedTest || approvedProduction);
@@ -467,13 +487,18 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
   const product = fromDbProduct(matchedRow);
 
   if (config.blockDuplicate) {
-    const { data: duplicateRows, error: duplicateError } = await supabase
+    let duplicateQuery = supabase
       .from("interacoes")
       .select("id")
       .eq("produto_id", product.id)
       .eq("instagram_username", username)
-      .eq("direct_enviado", true)
-      .limit(1);
+      .eq("direct_enviado", true);
+
+    // Permit exactly one new review-phrase send without deleting the previous
+    // successful Direct record. Production duplicate handling stays unchanged.
+    if (approvedTest) duplicateQuery = duplicateQuery.eq("comentario_texto", comment);
+
+    const { data: duplicateRows, error: duplicateError } = await duplicateQuery.limit(1);
 
     if (duplicateError) throw duplicateError;
 
@@ -526,7 +551,13 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
   let reason = "Webhook processado em modo seguro, sem envio real.";
   let eventType = "comment_safe_mode";
 
-  if (canSendRealDirect) {
+  if (canSendRealDirect && META_REVIEW_ATTEMPTED_COMMENT_IDS.has(String(commentId))) {
+    reason = "Tentativa repetida do mesmo comentário de revisão bloqueada";
+    eventType = "comment_review_repeat_blocked";
+  } else if (canSendRealDirect) {
+    // In-memory guard stops concurrent retries on the same comment while the
+    // database records the send; the persisted duplicate query blocks later ones.
+    if (approvedTest) META_REVIEW_ATTEMPTED_COMMENT_IDS.add(String(commentId));
     try {
       directResult = await sendInstagramPrivateReply({ commentId, message, accessToken });
       directSent = true;

@@ -443,6 +443,40 @@ async function insertWebhookEvent(event) {
   return fromDbWebhookEvent(data);
 }
 
+// Controlled one-comment retest following an approved ordinary DM conversation.
+// Do NOT remove the general per-customer/per-product duplicate guard.
+// This temporary override is specific to one known customer and post, and
+// expires automatically. A prior successful send must already be recorded.
+let selectedRetestCommentId = null;
+async function allowSingleCustomerRetest({ source, postId, username, comment, commentId }) {
+  if (process.env.META_RETEST_ARMED !== "true" || source !== "webhook") return false;
+  const expectedUser = String(process.env.META_RETEST_USERNAME || "").trim().toLowerCase();
+  const expectedMedia = String(process.env.META_RETEST_MEDIA_ID || "").trim();
+  const previousCommentId = String(process.env.META_RETEST_PREVIOUS_COMMENT_ID || "").trim();
+  const expiresAt = Date.parse(process.env.META_RETEST_EXPIRES_AT || "");
+  const now = Date.now();
+  if (expectedUser !== "@codigodopmarcal" ||
+      String(username).toLowerCase() !== expectedUser ||
+      String(postId) !== expectedMedia ||
+      String(postId) !== String(process.env.META_TEST_MEDIA_ID || "") ||
+      String(commentId) === previousCommentId ||
+      !/^\d{10,25}$/.test(String(commentId || "")) ||
+      !/^\d{10,25}$/.test(previousCommentId) ||
+      normalizeText(comment) !== "eu quero" ||
+      !Number.isFinite(expiresAt) || expiresAt <= now || expiresAt - now > 60 * 60 * 1000) {
+    return false;
+  }
+  if (selectedRetestCommentId && selectedRetestCommentId !== String(commentId)) return false;
+  // After deploys, keep one-shot semantics using existing signed webhook audit.
+  const { data: alreadyRetested, error: retestErr } = await supabase.from("webhook_eventos")
+    .select("instagram_comment_id").eq("tipo_evento", "owner_live_reply_attempt")
+    .eq("instagram_username", expectedUser).eq("instagram_media_id", expectedMedia)
+    .neq("instagram_comment_id", previousCommentId).limit(1);
+  if (retestErr || alreadyRetested?.length) return false;
+  selectedRetestCommentId = String(commentId);
+  return true;
+}
+
 async function runCommentEngine({ postId, username, comment, commentId = null, userId = null, source = "simulation", rawPayload = {} }) {
   const config = await getBotConfig();
   const accessToken = getMetaAccessToken(config);
@@ -525,7 +559,12 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
 
     if (duplicateError) throw duplicateError;
 
-    if (duplicateRows?.length) {
+    // One explicit re-test of the same product is allowed after a confirmed
+    // inbound Direct. All other duplicate comments stay blocked.
+    const allowedRetest = Boolean(duplicateRows?.length) &&
+      await allowSingleCustomerRetest({ source, postId, username, comment, commentId });
+
+    if (duplicateRows?.length && !allowedRetest) {
       const interaction = await insertInteraction({
         productId: product.id,
         username,

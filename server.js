@@ -943,18 +943,24 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
 }
 
 function verifyMetaSignature(req, res, next) {
-  // Meta signs the raw, unmodified JSON body with X-Hub-Signature-256.
-  // Reject unsigned requests even when the bot is in simulation mode.
+  // Safe diagnostic only: never log actual signatures, secrets, identities or content.
   if (!META_APP_SECRET) {
+    console.warn("Meta webhook rejected: signing secret is missing");
     return res.status(503).json({ ok: false, message: "Webhook temporariamente indisponível." });
   }
   const signature = req.get("X-Hub-Signature-256") || "";
   const expected = "sha256=" + crypto.createHmac("sha256", META_APP_SECRET)
     .update(req.rawBody || Buffer.alloc(0))
     .digest("hex");
-  if (!/^sha256=[0-9a-f]{64}$/i.test(signature) || !constantTimeMatches(signature.toLowerCase(), expected)) {
+  if (!/^sha256=[0-9a-f]{64}$/i.test(signature)) {
+    console.warn("Meta webhook rejected: SHA-256 signature header missing or malformed");
     return res.sendStatus(403);
   }
+  if (!constantTimeMatches(signature.toLowerCase(), expected)) {
+    console.warn("Meta webhook rejected: SHA-256 signature mismatch");
+    return res.sendStatus(403);
+  }
+  console.info("Meta webhook signature verified");
   return next();
 }
 

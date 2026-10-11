@@ -19,6 +19,9 @@ const GRAPH_VERSION = process.env.GRAPH_VERSION || "v25.0";
 const DIRECT_ENABLED = String(process.env.DIRECT_ENABLED ?? "false").toLowerCase() === "true";
 const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN || "";
 const META_APP_SECRET = process.env.META_APP_SECRET || "";
+// Instagram Login has its own App ID and signing secret distinct from
+// the Meta parent app's secret. Store it ONLY in Render environment vars.
+const INSTAGRAM_APP_SECRET = process.env.INSTAGRAM_APP_SECRET || "";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -943,24 +946,35 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
 }
 
 function verifyMetaSignature(req, res, next) {
-  // Safe diagnostic only: never log actual signatures, secrets, identities or content.
-  if (!META_APP_SECRET) {
+  // Never reveal or log secrets, signatures, comment contents or account identity.
+  // Both App Secrets may legitimately sign events depending on the product.
+  const configuredSecrets = [
+    { type: "instagram", value: INSTAGRAM_APP_SECRET },
+    { type: "meta", value: META_APP_SECRET }
+  ].filter((item) => Boolean(item.value));
+  if (!configuredSecrets.length) {
     console.warn("Meta webhook rejected: signing secret is missing");
     return res.status(503).json({ ok: false, message: "Webhook temporariamente indisponível." });
   }
   const signature = req.get("X-Hub-Signature-256") || "";
-  const expected = "sha256=" + crypto.createHmac("sha256", META_APP_SECRET)
-    .update(req.rawBody || Buffer.alloc(0))
-    .digest("hex");
   if (!/^sha256=[0-9a-f]{64}$/i.test(signature)) {
     console.warn("Meta webhook rejected: SHA-256 signature header missing or malformed");
     return res.sendStatus(403);
   }
-  if (!constantTimeMatches(signature.toLowerCase(), expected)) {
-    console.warn("Meta webhook rejected: SHA-256 signature mismatch");
+  const matchedType = configuredSecrets.find(({ value }) => {
+    const expected = "sha256=" + crypto.createHmac("sha256", value)
+      .update(req.rawBody || Buffer.alloc(0))
+      .digest("hex");
+    return constantTimeMatches(signature.toLowerCase(), expected);
+  })?.type;
+  if (!matchedType) {
+    console.warn("Meta webhook rejected: SHA-256 signature mismatch", JSON.stringify({
+      instagramKeyConfigured: Boolean(INSTAGRAM_APP_SECRET),
+      metaKeyConfigured: Boolean(META_APP_SECRET)
+    }));
     return res.sendStatus(403);
   }
-  console.info("Meta webhook signature verified");
+  console.info("Meta webhook signature verified", JSON.stringify({ signer: matchedType }));
   return next();
 }
 

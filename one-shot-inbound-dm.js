@@ -36,7 +36,7 @@ export async function runOwnerInboundDmTest({ supabase, getAccessToken, sendNorm
   const verifiedAccountId = String(ownerReplyResult.data[0].payload?.entry?.[0]?.id || "");
   const commentChange = ownerReplyResult.data[0].payload?.entry?.flatMap(x => x.changes || [])
     .find(x => x.value?.from?.id === expectedSender && x.value?.from?.username === expectedHandle.slice(1));
-  if (!commentChange || !/^\\d{10,25}$/.test(verifiedAccountId)) {
+  if (!commentChange || !/^\d{10,25}$/.test(verifiedAccountId)) {
     console.warn("One-off DM test cancelled: commenter identity mismatch");
     return;
   }

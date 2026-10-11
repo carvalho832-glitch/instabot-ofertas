@@ -460,8 +460,8 @@ async function allowSingleCustomerRetest({ source, postId, username, comment, co
       String(postId) !== expectedMedia ||
       String(postId) !== String(process.env.META_TEST_MEDIA_ID || "") ||
       String(commentId) === previousCommentId ||
-      !/^\\d{10,25}$/.test(String(commentId || "")) ||
-      !/^\\d{10,25}$/.test(previousCommentId) ||
+      !/^\d{10,25}$/.test(String(commentId || "")) ||
+      !/^\d{10,25}$/.test(previousCommentId) ||
       normalizeText(comment) !== "eu quero" ||
       !Number.isFinite(expiresAt) || expiresAt <= now || expiresAt - now > 60 * 60 * 1000) {
     return false;

@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import { createReviewRouter } from "./review-routes.js";
 import { runApprovedFollowerOneShot } from "./one-shot-follower.js";
 import { sendOwnerReplyOnce } from "./owner-live-guard.js";
+import { runOwnerInboundDmTest } from "./one-shot-inbound-dm.js";
 
 // Node 18+ já possui fetch global.
 dotenv.config();
@@ -378,6 +379,19 @@ async function sendInstagramPrivateReply({ commentId, message, accessToken }) {
   }, accessToken);
   if (!result.message_id) throw new Error("Instagram accepted the request but returned no message ID");
   return { recipient_id: result.recipient_id, message_id: result.message_id };
+}
+
+async function sendInstagramNormalDM({ recipientId, message, accessToken }) {
+  if (!/^\d{10,25}$/.test(String(recipientId || ""))) throw new Error("Invalid Instagram-scoped recipient ID");
+  const accountId = await authenticatedInstagramAccount(accessToken);
+  const result = await instagramPost(`${encodeURIComponent(accountId)}/messages`, {
+    recipient: { id: String(recipientId) },
+    message: { text: String(message) }
+  }, accessToken);
+  if (!result.message_id) throw new Error("Instagram accepted the ordinary DM but returned no message ID");
+  if (result.recipient_id && String(result.recipient_id) !== String(recipientId))
+    throw new Error("Instagram returned an unexpected recipient ID");
+  return { recipient_id: result.recipient_id || String(recipientId), message_id: result.message_id };
 }
 
 async function sendInstagramPublicReply({ commentId, message, accessToken }) {
@@ -1167,6 +1181,11 @@ async function requestMetaCommentSubscription() {
 app.listen(PORT, () => {
   console.log(`InstaBot Ofertas rodando na porta ${PORT}`);
   console.log(`Modo inicial: ${BOT_MODE} | Direct enabled: ${DIRECT_ENABLED} | Graph: ${GRAPH_VERSION}`);
+  void runOwnerInboundDmTest({
+    supabase,
+    getAccessToken: getMetaAccessToken,
+    sendNormalDM: sendInstagramNormalDM
+  }).catch(error => console.warn("Owner inbound DM one-shot failure:", error?.name));
   void inspectMetaSubscriptions();
   void requestMetaCommentSubscription();
   void runApprovedFollowerOneShot({ supabase, getAccessToken: getMetaAccessToken, sendPrivateReply: sendInstagramPrivateReply })

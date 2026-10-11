@@ -391,7 +391,18 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
   const config = await getBotConfig();
   const accessToken = getMetaAccessToken(config);
   const connectedMode = isConnectedMode(config);
-  const canSendRealDirect = source === "webhook" && connectedMode && DIRECT_ENABLED && Boolean(accessToken) && Boolean(commentId);
+  // Fail closed in test mode. Only the authorized account and the exact
+  // Instagram media ID may receive a real reply. Leave all traffic disabled
+  // unless the server operator explicitly selects a live audience.
+  const liveAudience = String(process.env.META_LIVE_AUDIENCE || "none").trim().toLowerCase();
+  const testUsername = normalizeText(process.env.META_TEST_USERNAME || "").replace(/^@/, "");
+  const testMediaId = String(process.env.META_TEST_MEDIA_ID || "").trim();
+  const commenter = normalizeText(username).replace(/^@/, "");
+  const approvedTest = liveAudience === "test" && Boolean(testUsername) && Boolean(testMediaId)
+    && commenter === testUsername && postId === testMediaId;
+  const approvedProduction = liveAudience === "all";
+  const canSendRealDirect = source === "webhook" && connectedMode && DIRECT_ENABLED
+    && Boolean(accessToken) && Boolean(commentId) && (approvedTest || approvedProduction);
   const safeMode = !canSendRealDirect;
 
   const { data: rows, error: productError } = await supabase
@@ -638,6 +649,9 @@ app.get("/health", (req, res) => {
     webhook: META_APP_SECRET ? "signed" : "disabled",
     adminApi: ADMIN_API_TOKEN ? "protected" : "disabled",
     graphVersion: GRAPH_VERSION,
+    metaAccessTokenConfigured: Boolean(process.env.META_ACCESS_TOKEN || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.ACCESS_TOKEN),
+    instagramAccountIdConfigured: Boolean(process.env.INSTAGRAM_ACCOUNT_ID || process.env.INSTAGRAM_BUSINESS_ID || process.env.IG_USER_ID),
+    liveAudience: String(process.env.META_LIVE_AUDIENCE || "none"),
     timestamp: new Date().toISOString()
   });
 });

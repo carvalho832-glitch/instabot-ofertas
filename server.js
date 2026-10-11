@@ -551,8 +551,8 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
   let reason = "Webhook processado em modo seguro, sem envio real.";
   let eventType = "comment_safe_mode";
 
-  if (canSendRealDirect && META_REVIEW_ATTEMPTED_COMMENT_IDS.has(String(commentId))) {
-    reason = "Tentativa repetida do mesmo comentário de revisão bloqueada";
+  if (canSendRealDirect && approvedTest && META_REVIEW_ATTEMPTED_COMMENT_IDS.size > 0) {
+    reason = "Janela de revisão já utilizou sua única tentativa de envio";
     eventType = "comment_review_repeat_blocked";
   } else if (canSendRealDirect) {
     // In-memory guard stops concurrent retries on the same comment while the

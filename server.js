@@ -221,7 +221,9 @@ function buildDirectMessage(product, username) {
     .replaceAll("{{link}}", product.link || "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  // All links are affiliate promotions, including products using a custom message.
+  // A WhatsApp group invitation is not itself an affiliate product link.
+  if (product.postId === "__whatsapp_grupo_ofertas__") return rendered;
+  // Individual product links are affiliate promotions, including custom messages.
   return /(?:#publi|link de afiliado)/i.test(rendered)
     ? rendered
     : `${rendered}\n\n#publi • Link de afiliado da Mina de Ofertas. Confira preço, cor e características antes de comprar.`;
@@ -502,7 +504,20 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
 
   if (productError) throw productError;
 
-  const matchedRow = (rows || []).find((row) => commentHasKeyword(comment, row.palavras_chave || []));
+  let matchedRow = (rows || []).find((row) => commentHasKeyword(comment, row.palavras_chave || []));
+  // Generic campaign posts (without an individual product) can invite users
+  // who explicitly commented "EU QUERO" to the WhatsApp deals group.
+  // Product-specific replies always take priority over this fallback.
+  if (!matchedRow && normalizeText(comment) === "eu quero") {
+    const { data: inviteRows, error: inviteError } = await supabase
+      .from("produtos")
+      .select("*")
+      .eq("ativo", true)
+      .eq("instagram_media_id", "__whatsapp_grupo_ofertas__")
+      .limit(1);
+    if (inviteError) throw inviteError;
+    matchedRow = inviteRows?.[0] || null;
+  }
 
   if (!matchedRow) {
     const interaction = await insertInteraction({

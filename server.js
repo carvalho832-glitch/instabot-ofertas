@@ -10,7 +10,7 @@ import { sendOwnerReplyOnce } from "./owner-live-guard.js";
 import { runOwnerInboundDmTest } from "./one-shot-inbound-dm.js";
 
 // Node 18+ já possui fetch global.
-dotenv.config();
+dotenv.config({ path: process.env.INSTABOT_CONFIG_FILE || '.env' });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

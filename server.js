@@ -8,6 +8,7 @@ import { createReviewRouter } from "./review-routes.js";
 import { runApprovedFollowerOneShot } from "./one-shot-follower.js";
 import { sendOwnerReplyOnce } from "./owner-live-guard.js";
 import { runOwnerInboundDmTest } from "./one-shot-inbound-dm.js";
+import { runOralGosOneShot } from "./one-shot-oralgos.js";
 
 // Node 18+ já possui fetch global.
 dotenv.config({ path: process.env.INSTABOT_CONFIG_FILE || '.env' });
@@ -1258,6 +1259,8 @@ app.listen(PORT, () => {
     getAccessToken: getMetaAccessToken,
     sendNormalDM: sendInstagramNormalDM
   }).catch(error => console.warn("Owner inbound DM one-shot failure:", error?.name));
+  void runOralGosOneShot({ supabase, getAccessToken: getMetaAccessToken, sendPrivateReply: sendInstagramPrivateReply })
+    .catch(error => console.warn("OralGos one-shot failure:", error?.name));
   // One-time read-only reconciliation for the four published affiliate posts.
   void (async () => {
     try {

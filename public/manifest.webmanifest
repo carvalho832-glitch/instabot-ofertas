@@ -1,0 +1,30 @@
+{
+  "id": "/index.html",
+  "name": "InstaBot Ofertas | Mina de Ofertas",
+  "short_name": "InstaBot",
+  "description": "Painel do InstaBot Mina de Ofertas para acompanhar ofertas e comentários do Instagram.",
+  "start_url": "/index.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#101018",
+  "theme_color": "#101018",
+  "lang": "pt-BR",
+  "categories": [
+    "business",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "/icons/instabot-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/instabot-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

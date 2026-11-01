@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101018">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" sizes="192x192" href="/icons/instabot-192.png" type="image/png">
 <title>InstaBot Ofertas | Painel de demonstração</title>
 <style>
 :root{font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:#18253a;background:#f5f8fc}
@@ -28,6 +31,9 @@ footer{color:#8190a1;font-size:12px;margin-top:20px;text-align:center}
 </head>
 <body>
 <header><div class="wrap"><div><h1>🤖 InstaBot Ofertas</h1><p class="subtitle">Mina de Ofertas • Painel de demonstração</p></div><div class="pill">👁️ Visualização sem edição</div></div></header>
+<div style="max-width:1160px;margin:15px auto 0;padding:0 22px">
+<a href="/index.html" style="display:inline-block;padding:11px 16px;background:#174b8e;color:#fff;border-radius:9px;text-decoration:none;font-weight:800">📲 Abrir painel completo e instalar aplicativo</a>
+</div>
 <main>
 <div class="kicker">Integração com Instagram • Meta App Review</div>
 <h2>Automação de comentários para respostas privadas</h2>
@@ -78,5 +84,6 @@ footer{color:#8190a1;font-size:12px;margin-top:20px;text-align:center}
   }catch(e){document.getElementById('productName').textContent='Não foi possível carregar a demonstração';}
 })();
 </script>
+<script defer src="/pwa-install.js"></script>
 </body>
 </html>

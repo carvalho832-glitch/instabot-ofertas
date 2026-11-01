@@ -4,6 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>InstaBot Ofertas</title>
+  <meta name="theme-color" content="#101018" />
+  <meta name="application-name" content="InstaBot Ofertas" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" sizes="192x192" type="image/png" href="/icons/instabot-192.png" />
+  <link rel="apple-touch-icon" href="/icons/instabot-192.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -19,6 +26,11 @@
         Modo simulação
       </div>
     </header>
+    <div class="pwa-install-tools">
+      <button id="installInstabot" type="button" class="pwa-install-button">📲 Instalar aplicativo</button>
+      <span class="pwa-install-copy">Acesse o painel direto pela tela inicial do celular.</span>
+    </div>
+    <p id="pwaInstallTip" class="pwa-install-tip" role="status" hidden></p>
 
     <nav class="tabs">
       <button class="tab-btn active" data-tab="bot">🤖 Bot de Ofertas</button>
@@ -365,5 +377,6 @@
 
   <script src="script.js"></script>
   <script src="backend-simulation.js"></script>
+  <script defer src="/pwa-install.js"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund
-COPY server.js server-wrapper.js boot.js review-routes.js owner-live-guard.js one-shot-inbound-dm.js one-shot-follower.js ./
+COPY server.js server-wrapper.js boot.js review-routes.js owner-live-guard.js one-shot-inbound-dm.js one-shot-follower.js one-shot-oralgos.js ./
 COPY public ./public
 USER node
 ENV PORT=8080

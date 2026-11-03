@@ -9,6 +9,7 @@ import { runApprovedFollowerOneShot } from "./one-shot-follower.js";
 import { sendOwnerReplyOnce } from "./owner-live-guard.js";
 import { runOwnerInboundDmTest } from "./one-shot-inbound-dm.js";
 import { runOralGosOneShot } from "./one-shot-oralgos.js";
+import { extractStoryReplies,handleStoryReply } from "./story-replies.js";
 
 // Node 18+ já possui fetch global.
 dotenv.config({ path: process.env.INSTABOT_CONFIG_FILE || '.env' });
@@ -22,6 +23,7 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "instabot_verify_token";
 const BOT_MODE = process.env.BOT_MODE || "simulation";
 const GRAPH_VERSION = process.env.GRAPH_VERSION || "v25.0";
 const DIRECT_ENABLED = String(process.env.DIRECT_ENABLED ?? "false").toLowerCase() === "true";
+const STORY_DIRECT_ENABLED = String(process.env.STORY_DIRECT_ENABLED ?? "false").toLowerCase() === "true";
 const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN || "";
 const META_APP_SECRET = process.env.META_APP_SECRET || "";
 // Instagram Login has its own App ID and signing secret distinct from
@@ -1047,14 +1049,43 @@ app.get("/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
+async function runStoryEngine(reply,isInternalTest=false){
+ const config=await getBotConfig();
+ const token=getMetaAccessToken(config);
+ const allowed=STORY_DIRECT_ENABLED && !isInternalTest && DIRECT_ENABLED &&
+  isConnectedMode(config) && String(process.env.META_LIVE_AUDIENCE||'').toLowerCase()==='all' &&
+  Boolean(token);
+ let ownerId=null;
+ if(allowed)ownerId=await authenticatedInstagramAccount(token);
+ const result=await handleStoryReply(reply,{
+  supabase,enabled:STORY_DIRECT_ENABLED,allowLive:allowed,ownerId,
+  renderMessage: (row)=>{
+   const product=fromDbProduct(row);
+   const text=buildDirectMessage(product,'');
+   return text.replace(/Vi seu comentário e separei o produto pra você:/i,
+    'Recebi sua resposta ao Story e separei o produto pra você:');
+  },
+  sendDirect:({recipientId,text})=>sendInstagramNormalDM({recipientId,message:text,accessToken:token})
+ });
+ // Audit only safe metadata, not private message text or sender identifiers.
+ try{await insertWebhookEvent({
+   source:isInternalTest?'webhook_test':'webhook',
+   eventType:'story_reply_'+result.status,postId:reply.storyId,
+   commentId:reply.messageId,matched:result.status==='sent'||result.status==='duplicate',
+   safeMode:result.status!=='sent',
+   payload:{source:'story_reply',status:result.status}
+ })}catch(e){console.warn('Story reply audit unavailable',e.code||e.name)}
+ return result;
+}
 async function processWebhookPayload(req, res, isInternalTest = false) {
   try {
     if (!supabase) return res.sendStatus(200);
 
     const comments = extractInstagramComments(req.body);
+    const stories = extractStoryReplies(req.body);
     const results = [];
 
-    if (!comments.length) {
+    if (!comments.length && !stories.length) {
       await insertWebhookEvent({
         source: isInternalTest ? "webhook_test" : "webhook",
         eventType: "raw_event_no_comment",
@@ -1063,7 +1094,7 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
         payload: req.body
       });
 
-      return res.status(200).json({ ok: true, received: true, comments: 0, results: [] });
+      return res.status(200).json({ ok: true, received: true, comments: 0, stories: 0, results: [] });
     }
 
     for (const item of comments) {
@@ -1080,10 +1111,21 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
       results.push(result);
     }
 
+    for (const story of stories){
+      try{
+       const result=await runStoryEngine(story,isInternalTest);
+       results.push({type:'story_reply',status:result.status});
+      }catch(e){
+       console.warn('Story reply not delivered:',e.code||e.name);
+       results.push({type:'story_reply',status:'error'});
+      }
+    }
+
     return res.status(200).json({
       ok: true,
       received: true,
       comments: comments.length,
+      stories: stories.length,
       results
     });
   } catch (error) {

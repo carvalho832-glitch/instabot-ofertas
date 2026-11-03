@@ -1062,7 +1062,7 @@ async function runStoryEngine(reply,isInternalTest=false){
   renderMessage: (row)=>{
    const product=fromDbProduct(row);
    const text=buildDirectMessage(product,'');
-   return text.replace(/Vi seu comentário e separei o produto pra você:/i,
+   return text.replace(/^Oi, tudo bem!?/i,'Olá!').replace(/Vi seu comentário e separei o produto pra você:/i,
     'Recebi sua resposta ao Story e separei o produto pra você:');
   },
   sendDirect:({recipientId,text})=>sendInstagramNormalDM({recipientId,message:text,accessToken:token})
@@ -1091,7 +1091,8 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
         eventType: "raw_event_no_comment",
         safeMode: true,
         matched: false,
-        payload: req.body
+        // Do not persist private message text or Instagram IDs from unrelated DMs.
+        payload: { object: String(req.body?.object||'').slice(0,40), recognizedStoryReplies: 0, recognizedComments: 0 }
       });
 
       return res.status(200).json({ ok: true, received: true, comments: 0, stories: 0, results: [] });

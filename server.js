@@ -10,6 +10,7 @@ import { sendOwnerReplyOnce } from "./owner-live-guard.js";
 import { runOwnerInboundDmTest } from "./one-shot-inbound-dm.js";
 import { runOralGosOneShot } from "./one-shot-oralgos.js";
 import { extractStoryReplies,handleStoryReply } from "./story-replies.js";
+import { createInstagramCatalogs, extractCatalogIncoming } from "./instagram-catalogos.mjs";
 
 // Node 18+ já possui fetch global.
 dotenv.config({ path: process.env.INSTABOT_CONFIG_FILE || '.env' });
@@ -119,6 +120,32 @@ app.use("/api", (req, res, next) => {
   }
   next();
 });
+
+// Catálogos PDF: endpoints privados protegidos pelo mesmo token do painel.
+// Envio real apenas com autorização explícita e conversa iniciada pelo cliente.
+const instagramCatalogs = createInstagramCatalogs({
+  supabase,
+  getLiveContext: async ({checkIdentity = true} = {}) => {
+    const config = await getBotConfig();
+    const ready = DIRECT_ENABLED && isConnectedMode(config) &&
+      String(process.env.META_LIVE_AUDIENCE || "").toLowerCase() === "all";
+    const accessToken = getMetaAccessToken(config);
+    if (!ready || !accessToken) return null;
+    const ownerId = checkIdentity ? await authenticatedInstagramAccount(accessToken) : "configured";
+    return {ownerId,accessToken};
+  },
+  sendPdf: async ({recipientId,accountId,accessToken,url}) => {
+    return instagramPost(encodeURIComponent(accountId) + "/messages", {
+      recipient: {id: String(recipientId)},
+      message: {attachment: {type: "file", payload: {url: String(url)}}}
+    }, accessToken);
+  },
+  sendText: ({recipientId,message,accessToken}) =>
+    sendInstagramNormalDM({recipientId,message,accessToken}),
+  sendCommentReply: ({commentId,message,accessToken}) =>
+    sendInstagramPrivateReply({commentId,message,accessToken})
+});
+app.use("/api/catalogos", instagramCatalogs.router);
 
 app.get("/", (req, res) => res.redirect(302, "/revisao-meta.html"));
 app.use("/review", createReviewRouter({ supabase, mediaId: process.env.META_TEST_MEDIA_ID, mode: BOT_MODE, directEnabled: DIRECT_ENABLED }));
@@ -1085,9 +1112,25 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
 
     const comments = extractInstagramComments(req.body);
     const stories = extractStoryReplies(req.body);
+    const incomingDm = extractCatalogIncoming(req.body);
     const results = [];
+    const handledMessageIds = new Set();
 
-    if (!comments.length && !stories.length) {
+    // O Direct do catálogo tem prioridade SOMENTE quando o cliente pediu a
+    // palavra-chave completa, sem interferir nas respostas de produtos.
+    for (const item of incomingDm) {
+      try {
+        const outcome = await instagramCatalogs.handleIncoming(item);
+        if (outcome.matched) {
+          handledMessageIds.add(item.mid);
+          results.push({type:"catalog_dm",status:outcome.status});
+        }
+      } catch (error) {
+        console.warn("InstaBot catalog DM unavailable:",error?.name || "Error");
+      }
+    }
+
+    if (!comments.length && !stories.length && !results.length) {
       await insertWebhookEvent({
         source: isInternalTest ? "webhook_test" : "webhook",
         eventType: "raw_event_no_comment",
@@ -1101,6 +1144,16 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
     }
 
     for (const item of comments) {
+      let catalogComment = {matched:false};
+      try {
+        catalogComment = await instagramCatalogs.handleComment(item);
+      } catch (error) {
+        console.warn("InstaBot catalog comment unavailable:",error?.name || "Error");
+      }
+      if (catalogComment.matched) {
+        results.push({type:"catalog_comment",status:catalogComment.status});
+        continue;
+      }
       const result = await runCommentEngine({
         postId: item.postId,
         username: item.username,
@@ -1115,6 +1168,7 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
     }
 
     for (const story of stories){
+      if (handledMessageIds.has(story.messageId)) continue;
       try{
        const result=await runStoryEngine(story,isInternalTest);
        results.push({type:'story_reply',status:result.status});

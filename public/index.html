@@ -36,6 +36,7 @@
       <button class="tab-btn active" data-tab="bot">🤖 Bot de Ofertas</button>
       <button class="tab-btn" data-tab="messages">💬 Mensagens</button>
       <button class="tab-btn" data-tab="data">📦 Dados</button>
+      <button class="tab-btn" data-tab="catalogos">🌙 Catálogos PDF</button>
       <button class="tab-btn" data-tab="config">⚙️ Configurações Instagram</button>
     </nav>
 
@@ -304,6 +305,49 @@
       </main>
     </section>
 
+    <section id="tab-catalogos" class="tab-content">
+      <main class="grid">
+        <section class="card">
+          <div class="section-title">
+            <h2>🌙 Catálogos PDF | Mina de Ofertas</h2>
+            <p>Cadastre arquivos para o bot enviar diretamente no Direct quando o cliente pedir. Aceita PDF de até 25 MB. A venda e a entrega seguem as condições do vendedor.</p>
+          </div>
+          <form id="igCatalogForm" class="form">
+            <label>Nome do catálogo
+              <input id="igCatalogName" required minlength="5" maxlength="100" value="Seleção dos Melhores Perfumes Árabes" />
+            </label>
+            <label>Mensagem que o cliente deve enviar
+              <input id="igCatalogKeyword" required minlength="5" maxlength="65" value="EU QUERO CATÁLOGO" />
+            </label>
+            <label>ID do Story (opcional, para vincular a um Story específico)
+              <input id="igCatalogStoryId" inputmode="numeric" placeholder="Ex.: 179..." pattern="[0-9]{10,25}" />
+            </label>
+            <label>ID do Reel/post de divulgação (opcional)
+              <input id="igCatalogPostId" inputmode="numeric" placeholder="Ex.: 179..." pattern="[0-9]{10,25}" />
+            </label>
+            <label>PDF do catálogo
+              <input id="igCatalogFile" type="file" accept=".pdf,application/pdf" required />
+            </label>
+            <small id="igCatalogSelected" role="status">Nenhum arquivo selecionado</small>
+            <button id="igCatalogUpload" class="btn primary" type="submit">📎 Cadastrar catálogo PDF</button>
+          </form>
+          <p id="igCatalogInfo" role="status" style="margin-top:14px"></p>
+        </section>
+        <section class="card">
+          <div class="section-title">
+            <h2>Catálogos cadastrados</h2>
+            <p>Ative o catálogo somente depois de conferir o PDF e a palavra-chave. Assim que o Direct estiver autorizado, o bot responderá aos pedidos explícitos.</p>
+          </div>
+          <p id="igCatalogLive" role="status">Verificando conexão do Direct...</p>
+          <div id="igCatalogList" aria-live="polite">Carregando...</div>
+          <button id="igCatalogRefresh" type="button" class="btn ghost-visible">Atualizar lista</button>
+          <p class="warning-box" style="margin-top:16px">
+            Resposta a Stories e mensagens privadas: o PDF é enviado pelo Direct. Comentários em Reels: o bot convida a pessoa a responder no Direct antes de enviar o arquivo. A API da Meta exige uma interação iniciada pelo cliente e limita o prazo de resposta.
+          </p>
+        </section>
+      </main>
+    </section>
+
     <section id="tab-config" class="tab-content">
       <main class="config-grid">
         <section class="card">
@@ -377,6 +421,7 @@
 
   <script src="script.js"></script>
   <script src="backend-simulation.js"></script>
+  <script src="catalogos-panel.js"></script>
   <script defer src="/pwa-install.js"></script>
 </body>
 </html>

@@ -1115,12 +1115,31 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
     const incomingDm = extractCatalogIncoming(req.body);
     const results = [];
     const handledMessageIds = new Set();
+    // Safe diagnostic: event counts and delivery statuses only. Never log
+    // customer IDs, message text, attachment URLs or access tokens.
+    if (!isInternalTest) {
+      const messagingEventCount = (Array.isArray(req.body?.entry) ? req.body.entry : [])
+        .reduce((total, entry) => total + (Array.isArray(entry.messaging) ? entry.messaging.length : 0), 0);
+      console.info("[INSTABOT CATALOGOS] Inbound counters", JSON.stringify({
+        messagingEventCount,
+        catalogCandidates: incomingDm.length,
+        storyReplies: stories.length,
+        comments: comments.length,
+        exactKeywordCandidates: incomingDm.filter(item =>
+          String(item.text || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "")
+            .trim().replace(/\\s+/g, " ").toUpperCase() === "EU QUERO CATALOGO"
+        ).length
+      }));
+    }
 
     // O Direct do catálogo tem prioridade SOMENTE quando o cliente pediu a
     // palavra-chave completa, sem interferir nas respostas de produtos.
     for (const item of incomingDm) {
       try {
         const outcome = await instagramCatalogs.handleIncoming(item);
+        if (!isInternalTest) console.info("[INSTABOT CATALOGOS] DM result", JSON.stringify({
+          matched: Boolean(outcome.matched), status: String(outcome.status || "unknown")
+        }));
         if (outcome.matched) {
           handledMessageIds.add(item.mid);
           results.push({type:"catalog_dm",status:outcome.status});

@@ -10,7 +10,7 @@ import { sendOwnerReplyOnce } from "./owner-live-guard.js";
 import { runOwnerInboundDmTest } from "./one-shot-inbound-dm.js";
 import { runOralGosOneShot } from "./one-shot-oralgos.js";
 import { extractStoryReplies,handleStoryReply } from "./story-replies.js";
-import { createInstagramCatalogs, extractCatalogIncoming } from "./instagram-catalogos.mjs";
+import { createInstagramCatalogs, extractCatalogIncoming, normalizeCatalogKeyword } from "./instagram-catalogos.mjs";
 
 // Node 18+ já possui fetch global.
 dotenv.config({ path: process.env.INSTABOT_CONFIG_FILE || '.env' });
@@ -131,8 +131,10 @@ const instagramCatalogs = createInstagramCatalogs({
       String(process.env.META_LIVE_AUDIENCE || "").toLowerCase() === "all";
     const accessToken = getMetaAccessToken(config);
     if (!ready || !accessToken) return null;
-    const ownerId = checkIdentity ? await authenticatedInstagramAccount(accessToken) : "configured";
-    return {ownerId,accessToken};
+    const identity = checkIdentity
+      ? await authenticatedInstagramRoutingIdentity(accessToken)
+      : { ownerId: "configured", ownerRecipientId: null };
+    return {...identity, accessToken};
   },
   sendPdf: async ({recipientId,accountId,accessToken,url}) => {
     return instagramPost(encodeURIComponent(accountId) + "/messages", {
@@ -400,6 +402,29 @@ async function authenticatedInstagramAccount(accessToken) {
     throw new Error(`Instagram account validation failed (HTTP ${response.status}; code ${profile.error?.code ?? "unknown"})`);
   }
   return String(profile.id);
+}
+
+// Instagram Login exposes two valid identifiers for the *same* verified profile:
+// /me.id (app-scoped; used for /messages) and /me.user_id (professional account;
+// arrives in signed inbound webhook recipient.id). Both must be checked separately.
+async function authenticatedInstagramRoutingIdentity(accessToken) {
+  const response = await fetch(`https://graph.instagram.com/${GRAPH_VERSION}/me?fields=id,user_id,username`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(12000)
+  });
+  const profile = await response.json().catch(() => ({}));
+  const expectedUsername = normalizeText(process.env.META_ACCOUNT_USERNAME_EXPECTED || "minadeofertas_ofc");
+  if (!response.ok || !/^\\d{10,25}$/.test(String(profile.id || "")) ||
+      !/^\\d{10,25}$/.test(String(profile.user_id || "")) ||
+      normalizeText(profile.username) !== expectedUsername) {
+    throw new Error(`Instagram routing identity validation failed (HTTP ${response.status}; code ${profile.error?.code ?? "unknown"})`);
+  }
+  const configuredProfessionalId = String(process.env.INSTAGRAM_ACCOUNT_ID ||
+    process.env.INSTAGRAM_BUSINESS_ID || process.env.IG_USER_ID || "").trim();
+  if (configuredProfessionalId && configuredProfessionalId !== String(profile.user_id)) {
+    throw new Error("Instagram professional account differs from the configured account");
+  }
+  return {ownerId: String(profile.id), ownerRecipientId: String(profile.user_id)};
 }
 
 async function sendInstagramPrivateReply({ commentId, message, accessToken }) {
@@ -1126,8 +1151,7 @@ async function processWebhookPayload(req, res, isInternalTest = false) {
         storyReplies: stories.length,
         comments: comments.length,
         exactKeywordCandidates: incomingDm.filter(item =>
-          String(item.text || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "")
-            .trim().replace(/\\s+/g, " ").toUpperCase() === "EU QUERO CATALOGO"
+          normalizeCatalogKeyword(item.text) === "EU QUERO CATALOGO"
         ).length
       }));
     }

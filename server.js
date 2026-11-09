@@ -414,8 +414,8 @@ async function authenticatedInstagramRoutingIdentity(accessToken) {
   });
   const profile = await response.json().catch(() => ({}));
   const expectedUsername = normalizeText(process.env.META_ACCOUNT_USERNAME_EXPECTED || "minadeofertas_ofc");
-  if (!response.ok || !/^\\d{10,25}$/.test(String(profile.id || "")) ||
-      !/^\\d{10,25}$/.test(String(profile.user_id || "")) ||
+  if (!response.ok || !/^\d{10,25}$/.test(String(profile.id || "")) ||
+      !/^\d{10,25}$/.test(String(profile.user_id || "")) ||
       normalizeText(profile.username) !== expectedUsername) {
     throw new Error(`Instagram routing identity validation failed (HTTP ${response.status}; code ${profile.error?.code ?? "unknown"})`);
   }

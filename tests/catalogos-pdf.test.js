@@ -109,7 +109,7 @@ test("cadastra privado, ativa, envia PDF uma vez e responde ao comentario",async
   assert.equal(env.sends[0].type,"pdf");
   assert.ok(env.sends[0].url.startsWith("https:"));
   assert.equal(env.sends[1].type,"text");
-  assert.match(env.sends[1].message,/venda, o envio e a entrega são responsabilidade/i);
+  assert.match(env.sends[1].message,/a venda e a entrega são responsabilidade/i);
   assert.equal((await env.catalog.handleIncoming(item)).status,"duplicate");
   assert.equal(env.sends.length,2);
   assert.equal((await env.catalog.handleIncoming({...item,mid:"new_mid",text:"EU QUERO PERFUME"})).matched,false);

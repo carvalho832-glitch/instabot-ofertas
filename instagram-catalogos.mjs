@@ -233,7 +233,9 @@ export function createInstagramCatalogs({
     if (!cat) return {matched:false,status:"no_keyword"};
     const context = await getLiveContext({checkIdentity:true});
     if (!context) return {matched:true,status:"live_disabled"};
-    if (String(context.ownerId) !== item.recipientId)
+    // Inbound signed webhook uses professional user_id, while the Graph
+    // /messages endpoint uses app-scoped /me.id.
+    if (String(context.ownerRecipientId ?? context.ownerId) !== item.recipientId)
       return {matched:true,status:"wrong_account"};
     const claimPath = await claim("dm",item.mid,cat.id);
     if (!claimPath) return {matched:true,status:"duplicate"};

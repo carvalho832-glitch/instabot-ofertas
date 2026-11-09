@@ -47,7 +47,11 @@ async function apiTest() {
   const sends=[];
   const catalog=createInstagramCatalogs({
     supabase:source.supabase,
-    getLiveContext:async ({checkIdentity})=>({ownerId:checkIdentity?"1234567890123":"configured",accessToken:"mock-token"}),
+    getLiveContext:async ({checkIdentity})=>({
+      ownerId:checkIdentity?"2345678901234":"configured",
+      ownerRecipientId:checkIdentity?"1234567890123":null,
+      accessToken:"mock-token"
+    }),
     sendPdf:async payload=>{sends.push({type:"pdf",...payload});return {message_id:"pdfid"}},
     sendText:async payload=>{sends.push({type:"text",...payload});return {message_id:"textid"}},
     sendCommentReply:async payload=>{sends.push({type:"comment",...payload});return {message_id:"replyid"}},
@@ -107,6 +111,9 @@ test("cadastra privado, ativa, envia PDF uma vez e responde ao comentario",async
   assert.equal((await env.catalog.handleIncoming(item)).status,"sent");
   assert.equal(env.sends.length,2);
   assert.equal(env.sends[0].type,"pdf");
+  assert.equal(env.sends[0].accountId,"2345678901234");
+  assert.equal((await env.catalog.handleIncoming({...item,mid:"wrong_acc_mid",recipientId:"2345678901234"})).status,"wrong_account");
+  assert.equal(env.sends.length,2);
   assert.ok(env.sends[0].url.startsWith("https:"));
   assert.equal(env.sends[1].type,"text");
   assert.match(env.sends[1].message,/a venda e a entrega são responsabilidade/i);

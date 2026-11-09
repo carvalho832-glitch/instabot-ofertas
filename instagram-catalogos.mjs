@@ -6,7 +6,17 @@ import crypto from "node:crypto";
 const BUCKET = "instabot-catalogos";
 const MAX_PDF_BYTES = 25 * 1024 * 1024;
 const KEYWORDS_MAX = 65;
-const DEFAULT_TEXT = "🌙 Aqui está a Seleção dos Melhores Perfumes Árabes da Mina de Ofertas! 💛\n\n📄 Abra o PDF e clique nos produtos para conferir as ofertas.\n💰 Preços e disponibilidade podem mudar.\n📦 A venda, o envio e a entrega são responsabilidade do vendedor e/ou do Mercado Livre, conforme as condições do anúncio.\n🛍️ Publicidade: a Mina de Ofertas divulga links de afiliado e pode receber comissão.";
+export const DEFAULT_TEXT = [
+  "🌙 Olá! Seu catálogo de perfumes árabes chegou! 💛",
+  "",
+  "📄 Abra o PDF enviado e toque nos perfumes para conferir os anúncios no Mercado Livre.",
+  "",
+  "💰 Preços e disponibilidade podem mudar.",
+  "📦 A venda e a entrega são responsabilidade do vendedor e/ou Mercado Livre, conforme o anúncio.",
+  "🛍️ A Mina de Ofertas divulga links de afiliado e pode receber comissão.",
+  "",
+  "Boas compras! ✨"
+].join("\n");
 
 export function normalizeCatalogKeyword(value) {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")

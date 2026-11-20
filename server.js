@@ -10,6 +10,7 @@ import { sendOwnerReplyOnce } from "./owner-live-guard.js";
 import { runOwnerInboundDmTest } from "./one-shot-inbound-dm.js";
 import { runOralGosOneShot } from "./one-shot-oralgos.js";
 import { extractStoryReplies,handleStoryReply } from "./story-replies.js";
+import { authenticatedAccountId } from "./instagram-account.js";
 
 // Node 18+ já possui fetch global.
 dotenv.config({ path: process.env.INSTABOT_CONFIG_FILE || '.env' });
@@ -362,17 +363,20 @@ async function instagramPost(edge, payload, accessToken) {
 }
 
 // Resolve the account from the *same token* instead of a potentially stale ID.
-async function authenticatedInstagramAccount(accessToken) {
-  const response = await fetch(`https://graph.instagram.com/${GRAPH_VERSION}/me?fields=id,username`, {
+async function authenticatedInstagramAccount(accessToken, { forWebhook = false } = {}) {
+  // Webhooks identify the professional account by user_id, which may differ from the app-scoped id.
+  const response = await fetch(`https://graph.instagram.com/${GRAPH_VERSION}/me?fields=id,user_id,username`, {
     headers: { Authorization: `Bearer ${accessToken}` },
     signal: AbortSignal.timeout(12000)
   });
   const profile = await response.json().catch(() => ({}));
-  const expectedUsername = normalizeText(process.env.META_ACCOUNT_USERNAME_EXPECTED || "minadeofertas_ofc");
-  if (!response.ok || !profile.id || normalizeText(profile.username) !== expectedUsername) {
+  if (!response.ok) {
     throw new Error(`Instagram account validation failed (HTTP ${response.status}; code ${profile.error?.code ?? "unknown"})`);
   }
-  return String(profile.id);
+  return authenticatedAccountId(profile, {
+    webhook: forWebhook,
+    expectedUsername: process.env.META_ACCOUNT_USERNAME_EXPECTED || 'minadeofertas_ofc'
+  });
 }
 
 async function sendInstagramPrivateReply({ commentId, message, accessToken }) {
@@ -388,7 +392,7 @@ async function sendInstagramPrivateReply({ commentId, message, accessToken }) {
 
 async function sendInstagramNormalDM({ recipientId, message, accessToken }) {
   if (!/^\d{10,25}$/.test(String(recipientId || ""))) throw new Error("Invalid Instagram-scoped recipient ID");
-  const accountId = await authenticatedInstagramAccount(accessToken);
+  const accountId = await authenticatedInstagramAccount(accessToken, { forWebhook: true });
   const result = await instagramPost(`${encodeURIComponent(accountId)}/messages`, {
     recipient: { id: String(recipientId) },
     message: { text: String(message) }
@@ -1058,7 +1062,7 @@ async function runStoryEngine(reply,isInternalTest=false){
   isConnectedMode(config) && String(process.env.META_LIVE_AUDIENCE||'').toLowerCase()==='all' &&
   Boolean(token);
  let ownerId=null;
- if(allowed)ownerId=await authenticatedInstagramAccount(token);
+ if(allowed)ownerId=await authenticatedInstagramAccount(token, { forWebhook: true });
  const result=await handleStoryReply(reply,{
   supabase,enabled:STORY_DIRECT_ENABLED,allowLive:allowed,ownerId,
   renderMessage: (row)=>{

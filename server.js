@@ -658,7 +658,7 @@ async function runCommentEngine({ postId, username, comment, commentId = null, u
         try {
           publicReplyResult = await sendInstagramPublicReply({
             commentId,
-            message: `${username}, te mandei o link no Direct 🛒`,
+            message: 'Prontinho! Enviei o link no seu direct!',
             accessToken
           });
           publicReplySent = true;
